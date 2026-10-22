@@ -40,6 +40,8 @@ services:
       dockerfile: docker/Dockerfile.app
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
+        # 国内网络直连 proxy.golang.org 会超时；与 scripts/build_images.sh 使用同一个默认镜像源。
+        - GOPROXY_ARG=${GOPROXY_ARG:-https://goproxy.cn,direct}
         - WITH_ANYDOC=${WITH_ANYDOC:-1}
     container_name: WeKnora-app
     ports:

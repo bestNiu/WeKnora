@@ -17,6 +17,13 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
     rm -rf /var/lib/apt/lists/*
 ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:$PATH
+# 国内网络直连 static.rust-lang.org / crates.io 会超时；用 rsproxy 镜像（可用 build-arg 覆盖）。
+ARG RUSTUP_DIST_SERVER_ARG=https://rsproxy.cn
+ARG RUSTUP_UPDATE_ROOT_ARG=https://rsproxy.cn/rustup
+ARG CARGO_MIRROR_ARG=https://rsproxy.cn
+ENV RUSTUP_DIST_SERVER=${RUSTUP_DIST_SERVER_ARG} \
+    RUSTUP_UPDATE_ROOT=${RUSTUP_UPDATE_ROOT_ARG}
+RUN mkdir -p "$CARGO_HOME" && printf '[source.crates-io]\nreplace-with = "rsproxy-sparse"\n\n[source.rsproxy-sparse]\nregistry = "sparse+%s/index/"\n\n[net]\ngit-fetch-with-cli = true\n' "$CARGO_MIRROR_ARG" > "$CARGO_HOME/config.toml"
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
 COPY scripts/build_browserskill.sh scripts/browserskill-release.json ./scripts/
 ARG TARGETOS
@@ -76,8 +83,14 @@ ENV GO_VERSION=${GO_VERSION_ARG}
 # engine; pass WITH_ANYDOC=0 to skip the Rust toolchain (~few minutes and
 # ~1 GB of build-stage layers).
 ARG WITH_ANYDOC=1
+ARG RUSTUP_DIST_SERVER_ARG=https://rsproxy.cn
+ARG RUSTUP_UPDATE_ROOT_ARG=https://rsproxy.cn/rustup
+ARG CARGO_MIRROR_ARG=https://rsproxy.cn
 ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:$PATH
+ENV RUSTUP_DIST_SERVER=${RUSTUP_DIST_SERVER_ARG} \
+    RUSTUP_UPDATE_ROOT=${RUSTUP_UPDATE_ROOT_ARG}
+RUN mkdir -p "$CARGO_HOME" && printf '[source.crates-io]\nreplace-with = "rsproxy-sparse"\n\n[source.rsproxy-sparse]\nregistry = "sparse+%s/index/"\n\n[net]\ngit-fetch-with-cli = true\n' "$CARGO_MIRROR_ARG" > "$CARGO_HOME/config.toml"
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     if [ "$WITH_ANYDOC" = "1" ]; then \

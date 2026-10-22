@@ -125,6 +125,11 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 		if k.FileType != "" {
 			fmt.Fprintf(&b, " file_type=\"%s\"", xmlEscape(k.FileType))
 		}
+		// App URL for the document (drawer + preview). A relative link survives the
+		// chat sanitizer, opens in a new tab, and lands on the KB page with this
+		// document opened, which is what "出处" needs to be clickable.
+		fmt.Fprintf(&b, " link=\"/platform/knowledge-bases/%s?knowledge_id=%s\"",
+			xmlEscape(kbID), xmlEscape(k.ID))
 		if k.ParseStatus != "" {
 			fmt.Fprintf(&b, " parse_status=\"%s\"", xmlEscape(formatParseStatus(k.ParseStatus)))
 		}
@@ -138,6 +143,8 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 		}
 		doc := map[string]interface{}{
 			"knowledge_id": k.ID,
+			"weknora_uri":  "weknora://doc/" + k.ID,
+			"app_url":      "/platform/knowledge-bases/" + kbID + "?knowledge_id=" + k.ID,
 			"title":        k.Title,
 			"description":  k.Description,
 			"type":         k.Type,
