@@ -511,6 +511,7 @@ export default {
     untitledSession: 'Untitled conversation',
     loadMore: 'Load more',
     loadFailed: 'Could not load artifacts',
+    pptxRenderFailed: 'This deck could not be rendered in its original layout (a shape or chart exceeds what the in-browser renderer supports). Use the parsed chunks below, or download the file and open it in desktop Office.',
     retry: 'Retry',
     clearFilters: 'Clear filters',
     empty: {

@@ -234,15 +234,52 @@ watch(() => props.active, (active) => {
 onMounted(() => {
   document.addEventListener('fullscreenchange', syncFullscreen);
   window.addEventListener('keydown', onFullscreenEscape, true);
+  // @vue-office/pptx renders the shape tree itself and does not route every
+  // failure through its `error` event: a slide whose chart/shape yields no
+  // node throws a raw DOMException ("appendChild ... is not of type 'Node'")
+  // out of its async render, which otherwise leaves a blank panel plus a
+  // cryptic console error. Catch that failure class for the pptx renderer and
+  // show the normal error panel instead.
+  window.addEventListener('error', onPptxRenderError);
+  window.addEventListener('unhandledrejection', onPptxRenderError);
 });
 
 onUnmounted(() => {
   fullscreenDisposed = true;
   document.removeEventListener('fullscreenchange', syncFullscreen);
   window.removeEventListener('keydown', onFullscreenEscape, true);
+  window.removeEventListener('error', onPptxRenderError);
+  window.removeEventListener('unhandledrejection', onPptxRenderError);
   void exitPreviewFullscreen();
   clearFallbackFullscreen();
 });
+
+// A DOMException raised inside the in-browser Office renderer describes that
+// renderer, not the document. Surface "layout could not be rendered" and point
+// at the parsed text / download, rather than leaving the panel blank.
+const PPTX_DOM_FAILURE = /not of type 'Node'|appendChild|insertBefore|removeChild/i;
+
+// The renderer's own error event carries the raw DOMException text for shapes
+// it cannot lay out. Translate that known failure into a message the reader can
+// act on; anything else keeps its original wording for support.
+function onPptxError(payload: unknown): void {
+  const message = String(((payload as { message?: string })?.message) || payload || '');
+  if (PPTX_DOM_FAILURE.test(message)) {
+    console.error('PPTX renderer failed:', payload);
+    error.value = t('preview.pptxRenderFailed');
+    return;
+  }
+  error.value = message || t('preview.loadFailed');
+}
+
+function onPptxRenderError(event: Event): void {
+  if (previewType.value !== 'pptx' || !pptxData.value || error.value) return;
+  const reason = (event as ErrorEvent).error || (event as PromiseRejectionEvent).reason;
+  const message = String((reason && (reason.message || reason)) || '');
+  if (!PPTX_DOM_FAILURE.test(message)) return;
+  console.error('PPTX renderer failed:', reason);
+  error.value = t('preview.pptxRenderFailed');
+}
 
 
 function ensureBlobType(blob: Blob, ft: string): Blob {
@@ -967,7 +1004,7 @@ onUnmounted(() => {
 
     <!-- PPTX -->
     <div v-else-if="previewType === 'pptx' && pptxData" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-pptx">
-      <vue-office-pptx :key="loadedForId" :src="pptxData" @rendered="onPptxRendered" @error="(e: any) => { error = e?.message || $t('preview.loadFailed'); }" />
+      <vue-office-pptx :key="loadedForId" :src="pptxData" @rendered="onPptxRendered" @error="onPptxError" />
     </div>
 
     <!-- Excel -->

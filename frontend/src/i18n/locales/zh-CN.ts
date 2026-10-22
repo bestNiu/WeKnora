@@ -2790,6 +2790,7 @@ export default {
     tab: '预览',
     loading: '正在加载文档预览...',
     loadFailed: '加载文档预览失败',
+    pptxRenderFailed: '该 PPT 的原始版式渲染失败（文件中的图形/图表超出在线渲染器能力）。可查看下方「分块」中的解析文本，或下载原文件用本地 Office 打开。',
     retry: '重试',
     unsupported: '该文件类型暂不支持在线预览',
     unsupportedHint: '请下载文件后使用本地应用查看',
