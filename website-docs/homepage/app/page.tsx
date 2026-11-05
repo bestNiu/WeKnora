@@ -9,7 +9,7 @@ import { Header, ProductVideo } from "./interactive";
 import { clients, dataSources, modelProviders, IntegrationMark } from "./brands";
 import s from "./home.module.css";
 
-const repo = "https://github.com/Tencent/WeKnora";
+const repo = "https://www.unionclin.com";
 const docs = "/docs/";
 const guide = (path: string) => `${docs}${path}.html`;
 const modes = [
@@ -55,12 +55,12 @@ const wikiSlides = [
   { name: "版本历史", icon: "history", image: "wiki-revision-history", title: "随时编辑，改动可回溯", description: "直接修订页面，也可让智能体协助维护。查看版本差异，必要时恢复到历史内容。", alt: "Wiki 版本历史：年假页面的历史版本列表、内容差异和回滚入口" },
 ].map(withAvailability);
 const sandboxSlides = [
-  { name: "会话级沙箱", icon: "sandbox", image: "skill-sandbox-chat", title: "在同一沙箱中继续执行任务", description: "支持 Docker、E2B、Cube。同一会话的多轮任务共用一个工作区，生成的文件可预览和下载；macOS Lite 还可绑定本机项目目录。", alt: "WeKnora 实际界面：智能体根据知识库生成 Word 文档，并在对话旁打开产物预览", link: guide("03-features/22-skills-sandbox") },
+  { name: "会话级沙箱", icon: "sandbox", image: "skill-sandbox-chat", title: "在同一沙箱中继续执行任务", description: "支持 Docker、E2B、Cube。同一会话的多轮任务共用一个工作区，生成的文件可预览和下载；macOS Lite 还可绑定本机项目目录。", alt: "有临 YLKnow 实际界面：智能体根据知识库生成 Word 文档，并在对话旁打开产物预览", link: guide("03-features/22-skills-sandbox") },
   { name: "图形桌面与终端", icon: "monitor", shots: [
-    { label: "图形桌面", icon: "monitor", image: "sandbox-desktop", alt: "WeKnora 实际界面：对话右侧沙箱面板的桌面页签，显示沙箱内的 XFCE 图形桌面与文件管理器" },
-    { label: "交互终端", icon: "terminal", image: "sandbox-terminal", alt: "WeKnora 实际界面：对话右侧的沙箱终端，列出工作区 output 目录中生成的 Word 文件" },
+    { label: "图形桌面", icon: "monitor", image: "sandbox-desktop", alt: "有临 YLKnow 实际界面：对话右侧沙箱面板的桌面页签，显示沙箱内的 XFCE 图形桌面与文件管理器" },
+    { label: "交互终端", icon: "terminal", image: "sandbox-terminal", alt: "有临 YLKnow 实际界面：对话右侧的沙箱终端，列出工作区 output 目录中生成的 Word 文件" },
   ], title: "打开桌面和终端，看清每一步", description: "在对话旁连接 Docker、E2B 或 Cube 的交互终端；使用 E2B、Cube 的桌面模板时，还可打开图形桌面并亲自操作。", link: guide("03-features/22-skills-sandbox") },
-  { name: "技能目录", icon: "skills", image: "skill-catalog", title: "安装、管理和复用技能", description: "从 ClawHub、SkillHub、Git 或 ZIP 安装技能，在空间内管理和复用；macOS Lite 也支持安装并运行本机技能。", alt: "WeKnora 实际界面：工具箱的技能管理页，列出 docx、pptx、pdf 技能及其安装到的沙箱", link: guide("03-features/22-skills-sandbox") },
+  { name: "技能目录", icon: "skills", image: "skill-catalog", title: "安装、管理和复用技能", description: "从 ClawHub、SkillHub、Git 或 ZIP 安装技能，在空间内管理和复用；macOS Lite 也支持安装并运行本机技能。", alt: "有临 YLKnow 实际界面：工具箱的技能管理页，列出 docx、pptx、pdf 技能及其安装到的沙箱", link: guide("03-features/22-skills-sandbox") },
 ].map(withAvailability);
 
 export default function Home() {
@@ -73,14 +73,14 @@ export default function Home() {
         <div className={s.heroGrid}>
           <h1 id="hero-title">帮你找到答案，<br /><em>并将知识付诸实践。</em></h1>
           <div className={s.heroAside}>
-            <p className={s.eyebrow}>TENCENT OPEN SOURCE · WEKNORA</p>
-            <p className={s.heroDescription}>腾讯开源的企业级知识管理框架。<br />汇集团队资料，用于知识问答、任务执行和 Wiki 整理。</p>
-            <div className={s.actions}><a className={s.primary} href="#get-started">开始使用 <Icon name="arrow" /></a><a className={s.secondary} href={repo} target="_blank" rel="noreferrer"><Icon name="github" /> GitHub</a></div>
+            <p className={s.eyebrow}>有临医药 · YLKNOW</p>
+            <p className={s.heroDescription}>有临 YLKnow 是企业知识智能平台。<br />汇集团队资料，用于知识问答、任务执行和 Wiki 整理。</p>
+            <div className={s.actions}><a className={s.primary} href="#get-started">开始使用 <Icon name="arrow" /></a><a className={s.secondary} href={repo} target="_blank" rel="noreferrer"><Icon name="external" /> 官网</a></div>
             <p className={s.heroNote}>RAG 问答 / Agent 推理 / 自动 Wiki</p>
           </div>
         </div>
         <ProductVideo />
-        <div className={s.trustBar}><span><Icon name="github" /> 腾讯开源 · MIT License</span><span><Icon name="server" /> 支持私有化部署</span><span><Icon name="model" /> 自由选择模型与存储</span></div>
+        <div className={s.trustBar}><span><Icon name="server" /> 有临医药 · 企业知识平台</span><span><Icon name="server" /> 支持私有化部署</span><span><Icon name="model" /> 自由选择模型与存储</span></div>
       </section>
       <section id="capabilities" className={`${s.chapter}`} data-tone="base" aria-labelledby="capabilities-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>01 / KNOWLEDGE AT WORK</p><h2 id="capabilities-title">知识问答、任务执行与自动 Wiki</h2></div><p>查询资料用 RAG，处理多步任务用 Agent，<br />整理知识用 Wiki。三种能力共享同一知识库。</p></div>
@@ -135,7 +135,7 @@ export default function Home() {
           <article className={s.startCard}>
             <div className={s.startLabel}><Image className={s.startBrand} src={`${homeAssets}/brands/tencent-cloud.ico`} alt="腾讯云 Logo" width={32} height={32} /><span>云端部署</span></div>
             <h3>腾讯云轻量应用服务器</h3>
-            <p>通过应用模板部署 WeKnora，在自己的云服务器上运行。</p>
+            <p>通过应用模板部署有临 YLKnow，在自己的云服务器上运行。</p>
             <a className={s.textLink} href="https://mc.tencent.com/s69nKCVz" target="_blank" rel="noreferrer">前往腾讯云部署 <Icon name="external" /></a>
           </article>
           <article className={s.startCard}>
@@ -147,6 +147,6 @@ export default function Home() {
         </div>
       </div></section>
     </main>
-    <footer className={`${s.shell} ${s.footer}`}><a className={s.brand} href="/" aria-label="WeKnora 首页"><BrandLogo /></a><p>Tencent Open Source · MIT License</p><nav aria-label="页脚导航"><a href={docs}>文档</a><a href={repo} target="_blank" rel="noreferrer">GitHub <Icon name="external" /></a><a href={`${repo}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">更新日志</a></nav></footer>
+    <footer className={`${s.shell} ${s.footer}`}><a className={s.brand} href="/" aria-label="有临 YLKnow 首页"><BrandLogo /></a><p>© 有临医药 · 企业知识智能平台</p><nav aria-label="页脚导航"><a href={docs}>文档</a><a href={repo} target="_blank" rel="noreferrer">官网 <Icon name="external" /></a></nav></footer>
   </div>;
 }

@@ -81,13 +81,13 @@ function tokenize(text: string): string[] {
   return tokens
 }
 
-const repo = 'https://github.com/Tencent/WeKnora'
+const repo = 'https://www.unionclin.com'
 
 export default withMermaid(
   defineConfig({
-    title: 'WeKnora',
-    titleTemplate: ':title · WeKnora 文档',
-    description: 'WeKnora（维娜拉）官方文档：部署、配置、功能说明、API 参考与二次开发',
+    title: '有临 YLKnow',
+    titleTemplate: ':title · 有临 YLKnow 文档',
+    description: '有临 YLKnow 官方文档：部署、配置、功能说明、API 参考与二次开发',
     lang: 'zh-CN',
     base: '/docs/',
     cleanUrls: true,
@@ -102,9 +102,9 @@ export default withMermaid(
 
     head: [
       ['link', { rel: 'icon', href: '/docs/favicon.ico', type: 'image/x-icon' }],
-      ['meta', { name: 'theme-color', content: '#101f38' }],
+      ['meta', { name: 'theme-color', content: '#007ac3' }],
       ['meta', { property: 'og:type', content: 'website' }],
-      ['meta', { property: 'og:title', content: 'WeKnora 文档' }],
+      ['meta', { property: 'og:title', content: '有临 YLKnow 文档' }],
       [
         'meta',
         {
@@ -129,7 +129,7 @@ export default withMermaid(
 
     themeConfig: {
       logoLink: { link: '/', target: '_self' },
-      siteTitle: 'WeKnora',
+      siteTitle: '有临 YLKnow',
 
       nav: [],
 
@@ -138,7 +138,6 @@ export default withMermaid(
 
       sidebar,
 
-      socialLinks: [{ icon: 'github', link: repo }],
 
       outline: { level: [2, 3], label: '本页目录' },
 
@@ -152,11 +151,6 @@ export default withMermaid(
       lastUpdated: {
         text: '最后更新',
         formatOptions: { dateStyle: 'medium', timeStyle: undefined },
-      },
-
-      editLink: {
-        pattern: `${repo}/edit/main/website-docs/:path`,
-        text: '在 GitHub 上编辑此页',
       },
 
       search: {
@@ -188,8 +182,8 @@ export default withMermaid(
       },
 
       footer: {
-        message: `基于 WeKnora ${repoVersionLabel} 源码整理 · MIT License`,
-        copyright: '© Tencent WeKnora',
+        message: `有临 YLKnow ${repoVersionLabel}`, 
+        copyright: '© 有临医药',
       },
     },
 

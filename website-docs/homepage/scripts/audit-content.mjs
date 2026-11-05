@@ -48,5 +48,5 @@ const pendingShots = [...html.matchAll(/website-docs\/homepage\/public(\/docs\/_
 for (const [, image] of html.matchAll(/\\?"image\\?":\\?"([\w-]+)\\?"[^{}]*?\\?"available\\?":false/g)) pendingShots.push(`/docs/_home/product/${image}.png`);
 if (pendingShots.length) console.warn(`Product screenshots still pending (placeholder shown): ${[...new Set(pendingShots)].join(', ')}`);
 assert.match(html, /aria-controls="main-navigation"/);
-assert.match(html, /aria-label="播放 WeKnora 产品介绍视频/);
+assert.match(html, /aria-label="播放有临 YLKnow 产品介绍视频/);
 console.log(`Homepage audit passed: product content, README video, navigation anchors, ${assets.size} local assets, and retired design choices.`);

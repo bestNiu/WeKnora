@@ -125,7 +125,7 @@ export function ModelLeaderboard() {
             <div><dt>correctness</dt><dd><b>陈述是否被证据支持</b></dd></div>
             <div><dt>completeness</dt><dd><b>关键子问题是否答全</b></dd></div>
             <div><dt>constraint</dt><dd><b>回答是否遵循明确及必要约束</b></dd></div>
-            <div><dt>数据集</dt><dd><b>WeKnora 评测数据集</b></dd></div>
+            <div><dt>数据集</dt><dd><b>有临 YLKnow 评测数据集</b></dd></div>
             <div><dt>判分模型</dt><dd><b>GPT-6 Astra</b></dd></div>
             <div><dt>分块</dt><dd><code>chunk_size=1000</code>、<code>chunk_overlap=200</code></dd></div>
             <div><dt>Embed</dt><dd><b>nvidia/Nemotron-3-Embed-8B-BF16</b></dd></div>
@@ -177,7 +177,7 @@ export function ModelLeaderboard() {
             <div><dt>correctness</dt><dd><b>陈述是否被证据支持</b></dd></div>
             <div><dt>completeness</dt><dd><b>关键子问题是否答全</b></dd></div>
             <div><dt>constraint</dt><dd><b>回答是否遵循明确及必要约束</b></dd></div>
-            <div><dt>数据集</dt><dd><b>WeKnora 评测数据集</b></dd></div>
+            <div><dt>数据集</dt><dd><b>有临 YLKnow 评测数据集</b></dd></div>
             <div><dt>判分模型</dt><dd><b>GPT-6 Astra</b></dd></div>
             <div><dt>分块</dt><dd><code>chunk_size=1000</code>、<code>chunk_overlap=200</code></dd></div>
             <div><dt>Embed</dt><dd><b>nvidia/Nemotron-3-Embed-8B-BF16</b></dd></div>
@@ -434,9 +434,9 @@ export function ModelLeaderboard() {
 
 <footer>
   <div className="wrap foot-in">
-    <span>WeKnora 模型评测</span>
+    <span>有临 YLKnow 模型评测</span>
     <span>数据截至 2026-10-08</span>
-    <span>WeKnora 版本 v0.8.0</span>
+    <span>有临 YLKnow 版本 v0.8.0</span>
   </div>
 </footer>
       </div>

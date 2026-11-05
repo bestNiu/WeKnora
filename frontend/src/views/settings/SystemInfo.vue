@@ -145,13 +145,6 @@
                 target="_blank"
                 rel="noopener noreferrer"
               >{{ $t('system.dbMigrationViewDocs') }}</t-link>
-              <span class="migration-error-actions-sep">·</span>
-              <t-link
-                theme="primary"
-                :href="reportIssueURL"
-                target="_blank"
-                rel="noopener noreferrer"
-              >{{ $t('system.dbMigrationReportIssue') }}</t-link>
             </div>
           </template>
         </t-alert>
@@ -253,32 +246,6 @@ const troubleshootingDocsURL = docsUrl('troubleshootingMigrations')
 // Pre-fills a new issue with the current migration error so users don't have to
 // paste it manually. Body is intentionally minimal — the bug template will fill
 // in the rest. Encode aggressively to survive newlines / quotes.
-const reportIssueURL = computed(() => {
-  const base = 'https://github.com/Tencent/WeKnora/issues/new'
-  const params = new URLSearchParams({
-    template: 'bug_report.yml',
-    title: '[Bug]: Database migration failed at startup',
-    labels: 'bug',
-  })
-  const errMsg = systemInfo.value?.db_migration_error
-  if (errMsg) {
-    const body = [
-      '### Environment',
-      `- WeKnora version: ${systemInfo.value?.version || 'unknown'}`,
-      `- Commit: ${systemInfo.value?.commit_id || 'unknown'}`,
-      `- Frontend version: ${frontendVersion} (${frontendCommit})`,
-      `- DB version reported: ${systemInfo.value?.db_version || 'unknown'}`,
-      '',
-      '### Migration error',
-      '```',
-      errMsg,
-      '```',
-    ].join('\n')
-    params.set('body', body)
-  }
-  return `${base}?${params.toString()}`
-})
-
 // Methods
 const loadInfo = async () => {
   try {

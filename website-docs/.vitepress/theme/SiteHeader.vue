@@ -29,14 +29,14 @@ onUnmounted(() => document.removeEventListener('keydown', closeMenu))
 <template>
   <header class="wk-header wk-docs-header">
     <div class="wk-header-inner">
-      <a class="wk-brand" href="/" target="_self" aria-label="WeKnora 首页"><span class="wk-logo"><img :src="`${homeAssets}/brand/weknora-original.png`" alt="WeKnora" width="945" height="650"></span></a>
+      <a class="wk-brand" href="/" target="_self" aria-label="有临 YLKnow 首页"><span class="wk-logo" style="display:inline-flex;align-items:baseline;gap:6px;font-size:20px;font-weight:700;white-space:nowrap">有临 <span style="color:#007ac3">YLKnow</span></span></a>
       <nav id="main-navigation" class="wk-navigation" :class="{ 'is-open': open }" aria-label="文档导航">
         <a v-for="item in docsNavigation" :key="item.href" :href="item.href" :aria-current="route.path.startsWith(item.section) ? 'page' : undefined" @click="open = false">{{ item.label }}</a>
         <div class="wk-header-search"><Search /></div>
-        <a class="wk-mobile-github" :href="repositoryUrl" target="_blank" rel="noreferrer">GitHub <HeaderIcon name="external" /></a>
+        <a class="wk-mobile-github" :href="repositoryUrl" target="_blank" rel="noreferrer">官网 <HeaderIcon name="external" /></a>
       </nav>
       <button class="wk-theme-toggle" type="button" role="switch" :aria-checked="isDark" :aria-label="label" :title="label" @click="isDark = !isDark"><HeaderIcon :name="isDark ? 'moon' : 'sun'" /></button>
-      <a class="wk-header-github" :href="repositoryUrl" target="_blank" rel="noreferrer"><HeaderIcon name="github" /><span>GitHub</span></a>
+      <a class="wk-header-github" :href="repositoryUrl" target="_blank" rel="noreferrer"><HeaderIcon name="external" /><span>官网</span></a>
       <button ref="menu" class="wk-menu-toggle" type="button" :aria-label="open ? '关闭导航' : '打开导航'" :aria-expanded="open" aria-controls="main-navigation" @click="open = !open"><HeaderIcon :name="open ? 'close' : 'menu'" /></button>
     </div>
   </header>

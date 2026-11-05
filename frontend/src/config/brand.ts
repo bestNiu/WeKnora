@@ -25,7 +25,7 @@ function readText(value: unknown, fallback: string, maxLength: number): string {
 }
 
 /** 产品显示名：出现在页面标题、侧栏 wordmark、登录页。 */
-export const APP_NAME = readText(runtime.APP_NAME, '企业知识库', 64)
+export const APP_NAME = readText(runtime.APP_NAME, '有临 YLKnow', 64)
 
 /** 一句副标题：出现在登录页与页面 description。 */
-export const APP_TAGLINE = readText(runtime.APP_TAGLINE, '内部资料智能问答', 96)
+export const APP_TAGLINE = readText(runtime.APP_TAGLINE, '企业知识智能平台', 96)
