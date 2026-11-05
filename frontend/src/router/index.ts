@@ -41,6 +41,25 @@ function hasPendingOIDCCallback() {
   return hash.includes('oidc_result=') || hash.includes('oidc_error=')
 }
 
+// 门户模式（viewer / contributor）下允许停留的路径。其余一律回聊天页。
+// 这是 UI 层的收敛，不是安全边界——真正的权限在服务端。
+function isPortalAllowedPath(to: RouteLocationNormalized) {
+  const path = to.path.replace(/\/+$/, '') || '/'
+  return (
+    path === '/login' ||
+    path === '/register' ||
+    path === '/onboarding/workspace' ||
+    path === '/join' ||
+    path === '/platform/creatChat' ||
+    /^\/platform\/chat\/[^/]+$/.test(path)
+  )
+}
+
+// 登录后的落地页：门户模式直接进新对话，其余角色仍进知识库列表。
+function landingPathFor(authStore: ReturnType<typeof useAuthStore>) {
+  return authStore.isPortalMode ? '/platform/creatChat' : '/platform/knowledge-bases'
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -326,7 +345,7 @@ router.beforeEach(async (to, from, next) => {
       }
     }
     if (authStore.hasValidTenant) {
-      next('/platform/knowledge-bases')
+      next(landingPathFor(authStore))
     } else {
       next()
     }
@@ -337,7 +356,7 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
     if (to.path === '/login' && authStore.isLoggedIn) {
-      next(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+      next(authStore.hasValidTenant ? landingPathFor(authStore) : '/onboarding/workspace')
       return
     }
     next()
@@ -379,6 +398,19 @@ router.beforeEach(async (to, from, next) => {
 
   if (to.meta.requiresTenant !== false && !authStore.hasValidTenant) {
     next('/onboarding/workspace')
+    return
+  }
+
+  // 门户模式：只放行聊天相关路由，手输 /platform/knowledge-bases 等 URL
+  // 也会被弹回新对话页。
+  //
+  // isPortalMode 读的是 memberships（localStorage / auth/me）。冷启动或换设备时
+  // localStorage 可能还没写入，此时角色是 ''，会被当成非门户而放行一次。
+  // 所以先校一次会话再判定。ensureAuthMe() 自带去重，只在本次会话首次导航时
+  // 真发请求。
+  await authStore.ensureAuthMe()
+  if (authStore.isPortalMode && !isPortalAllowedPath(to)) {
+    next('/platform/creatChat')
     return
   }
 

@@ -776,6 +776,19 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'api_token', labelKey: 'datasource.seafile.apiToken', placeholder: '', secret: true, hintKey: 'datasource.seafile.apiTokenHint' },
     ],
   },
+  {
+    // eDoc (易道 / edoc2 ECM): integration login with an account name plus the
+    // integration key configured in the eDoc admin console. No OAuth, no
+    // password storage. One data source mirrors whole folders, so the picker
+    // only offers folders.
+    type: 'edoc', available: true, docUrl: '',
+    permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.edoc.baseUrl', placeholder: 'https://edoc.example.com:8866' },
+      { key: 'login_name', labelKey: 'datasource.edoc.loginName', placeholder: 'aiuser' },
+      { key: 'integration_key', labelKey: 'datasource.edoc.integrationKey', placeholder: '', secret: true, hintKey: 'datasource.edoc.integrationKeyHint' },
+    ],
+  },
 ])
 
 

@@ -39,6 +39,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -64,6 +65,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	confluenceConnector "github.com/Tencent/WeKnora/internal/datasource/connector/confluence"
 	dingtalkConnector "github.com/Tencent/WeKnora/internal/datasource/connector/dingtalk"
+	edocConnector "github.com/Tencent/WeKnora/internal/datasource/connector/edoc"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
@@ -186,6 +188,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewAgentPromptRepository))
 	must(container.Provide(repository.NewAgentGrantRepository))
+	must(container.Provide(repository.NewKBUserAccessRepository))
+	must(container.Provide(repository.NewPreviewArtifactRepository))
 	must(container.Provide(repository.NewAgentRunSuspensionRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
@@ -261,8 +265,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewAuditLogService))
 	must(container.Provide(service.NewAuditLogRetentionRunner))
 	must(container.Provide(service.NewKnowledgeBaseService))
+	must(container.Provide(service.NewPreviewArtifactService))
+	must(container.Provide(service.NewKBVisibilityResolver))
 	must(container.Provide(service.NewGraphSearchService))
 	must(container.Provide(service.NewOrganizationService))
+	must(container.Provide(service.NewKBUserAccessService))
 	must(
 		container.Provide(service.NewKBShareService),
 	) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
@@ -677,6 +684,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewTenantInvitationHandler))
 	must(container.Provide(handler.NewAuditLogHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
+	must(container.Provide(handler.NewKBAccessAdminHandler))
+	must(container.Provide(handler.NewPreviewAdminHandler))
 	must(container.Provide(handler.NewGraphSearchHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
 	must(container.Provide(handler.NewChunkHandler))
@@ -812,6 +821,23 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
+	// Install the process-wide ACL resolver: public embed routes and IM
+	// callbacks are registered before the /api/v1 auth group and therefore
+	// never see the per-request middleware.
+	must(container.Invoke(func(resolver access.KBUserVisibilityResolver) {
+		access.SetDefaultKBUserVisibilityResolver(resolver)
+	}))
+	// Every ingestion path (HTTP upload, data source sync, IM, MCP, passages)
+	// funnels through the knowledge service; this trigger starts the derived
+	// preview at ingestion instead of first open.
+	must(container.Invoke(func(preview interfaces.PreviewArtifactService) {
+		service.SetKnowledgePreviewEnqueuer(func(ctx context.Context, knowledge *types.Knowledge) {
+			if _, err := preview.Ensure(ctx, knowledge); err != nil {
+				logger.Warnf(ctx, "Failed to enqueue preview render for %s: %v", knowledge.ID, err)
+			}
+		})
+	}))
+
 	return container
 }
 
@@ -1152,10 +1178,11 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	storageType = strings.ToLower(storageType)
 
 	result := db.Exec(
-		"UPDATE knowledge_bases SET storage_provider_config = ? WHERE "+
-			"storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = "+
-			"'__pending_env__'",
-		fmt.Sprintf(`{"provider":"%s"}`, storageType),
+		"UPDATE knowledge_bases "+
+			"SET storage_provider_config = jsonb_build_object('provider', ?::text) "+
+			"WHERE storage_provider_config IS NOT NULL "+
+			"AND storage_provider_config->>'provider' = '__pending_env__'",
+		storageType,
 	)
 	if result.Error != nil {
 		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
@@ -1993,12 +2020,17 @@ func NewDuckDB() (*sql.DB, error) {
 				"(DUCKDB_SKIP_EXTENSION_LOAD is set; xlsx ingest may fail without them)")
 	} else {
 		bgCtx := context.Background()
-		for _, ext := range []string{"spatial", "excel"} {
-			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("INSTALL %s;", ext)); err != nil {
-				logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext, err)
+		// Statements are fixed literals: DuckDB does not parameterise
+		// INSTALL/LOAD, so an interpolated name would be a SQL-injection sink.
+		for _, ext := range []struct{ name, install, load string }{
+			{name: "spatial", install: "INSTALL spatial;", load: "LOAD spatial;"},
+			{name: "excel", install: "INSTALL excel;", load: "LOAD excel;"},
+		} {
+			if _, err := sqlDB.ExecContext(bgCtx, ext.install); err != nil {
+				logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext.name, err)
 			}
-			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", ext)); err != nil {
-				logger.Warnf(bgCtx, "[DuckDB] Failed to load %s extension: %v", ext, err)
+			if _, err := sqlDB.ExecContext(bgCtx, ext.load); err != nil {
+				logger.Warnf(bgCtx, "[DuckDB] Failed to load %s extension: %v", ext.name, err)
 			}
 		}
 	}
@@ -2099,6 +2131,9 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(seafileConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register seafile connector: %w", err))
+	}
+	if err := registry.Register(edocConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register edoc connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

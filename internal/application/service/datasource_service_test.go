@@ -65,6 +65,10 @@ type processSyncKBService struct {
 	kb     *types.KnowledgeBase
 }
 
+func (s *processSyncKBService) SetVisibilityMode(context.Context, string, types.KBVisibilityMode) error {
+	return nil
+}
+
 func (s *processSyncKBService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
 	return nil, nil
 }

@@ -125,11 +125,20 @@ func (s *Scheduler) StopWithin(timeout time.Duration) {
 		"[Scheduler] in-flight sync still running after %s; continuing shutdown", timeout)
 }
 
+// schedulable reports whether a data source keeps its cron entry. "error"
+// means the last run failed, not that the operator disabled the source: dropping
+// the schedule on the first transient failure silently stops syncing until
+// somebody notices (a 02:00 network blip is enough). Only an explicit pause or
+// delete stops the clock; the next successful run flips the status back.
+func schedulable(status string) bool {
+	return status == types.DataSourceStatusActive || status == types.DataSourceStatusError
+}
+
 // AddOrUpdate registers (or re-registers) a cron entry for the given data source.
 func (s *Scheduler) AddOrUpdate(ds *types.DataSource) error {
 	// Reject an invalid replacement before removing the working entry. Inactive
 	// sources must still be removable even if their stored schedule is invalid.
-	if ds.Status == types.DataSourceStatusActive {
+	if schedulable(ds.Status) {
 		if err := ValidateSyncSchedule(ds.SyncSchedule); err != nil {
 			return err
 		}
@@ -142,7 +151,7 @@ func (s *Scheduler) AddOrUpdate(ds *types.DataSource) error {
 		delete(s.entries, ds.ID)
 	}
 
-	if ds.Status != types.DataSourceStatusActive || ds.SyncSchedule == "" {
+	if !schedulable(ds.Status) || ds.SyncSchedule == "" {
 		return nil
 	}
 
@@ -193,8 +202,8 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 	ctx := context.Background()
 
 	ds, err := s.dsRepo.FindByID(ctx, dataSourceID)
-	if err != nil || ds == nil || ds.Status != types.DataSourceStatusActive {
-		logger.Infof(ctx, "[Scheduler] skipping sync for ds=%s (not active or not found)", dataSourceID)
+	if err != nil || ds == nil || !schedulable(ds.Status) {
+		logger.Infof(ctx, "[Scheduler] skipping sync for ds=%s (paused/deleted or not found)", dataSourceID)
 		return
 	}
 

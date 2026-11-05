@@ -70,6 +70,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		KnowledgeBaseID string     `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
 		Enabled         *bool      `json:"enabled"`
+		OwnerUserID     *string    `json:"owner_user_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -97,6 +98,12 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		SessionMode: req.SessionMode,
 		Credentials: req.Credentials,
 		Enabled:     true,
+		// The bot acts as its creator for per-user KB access unless an admin
+		// picks someone else.
+		OwnerUserID: types.CallerFromContext(c.Request.Context()).UserID,
+	}
+	if req.OwnerUserID != nil && strings.TrimSpace(*req.OwnerUserID) != "" {
+		channel.OwnerUserID = strings.TrimSpace(*req.OwnerUserID)
 	}
 	// The route guard passes an agent it cannot find in this workspace; both
 	// the agent and the file-saving KB must belong to the channel's workspace.
@@ -231,6 +238,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		Credentials     types.JSON `json:"credentials"`
 		Enabled         *bool      `json:"enabled"`
 		AgentID         *string    `json:"agent_id"`
+		OwnerUserID     *string    `json:"owner_user_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -253,6 +261,9 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 			return
 		}
 		channel.Locale = locale
+	}
+	if req.OwnerUserID != nil {
+		channel.OwnerUserID = strings.TrimSpace(*req.OwnerUserID)
 	}
 	if req.SessionMode != nil {
 		channel.SessionMode = *req.SessionMode

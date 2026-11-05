@@ -211,7 +211,10 @@ export default {
         read_only: '只查看，不做任何修改。',
         confirm: '每次修改前暂停并通知你审批；可在详情里把常用操作设为长期授权。',
         auto_write: '可恢复的修改直接执行；删除等操作仍暂停等待审批。',
-      },
+ 
+      backfill: '生成全部预览',
+      backfillQueued: '已加入队列：{count} 个文档',
+      backfillStats: '已就绪 {ready} · 生成中 {pending} · 失败 {failed}',     },
     },
     schedule: {
       kinds: {
@@ -2028,8 +2031,8 @@ export default {
     },
     entityLink: {
       kb: '知识库',
-      doc: '文档',
-      chunk: '片段'
+      doc: '文档：点击在右侧预览，Ctrl/⌘+点击新标签打开',
+      chunk: '片段：点击在右侧预览，Ctrl/⌘+点击新标签打开'
     },
     tools: {
       searchKnowledge: '知识库检索',
@@ -7933,6 +7936,20 @@ export default {
     }
   },
   knowledgeBase: {
+    access: {
+      title: '成员与权限',
+      hint: '控制谁能看到这个知识库、谁能下载原始文件；下载权限独立于可见性。',
+      visibility: '可见范围',
+      modeTenant: '全空间可见',
+      modeRestricted: '指定成员',
+      restrictedHint: '切换为“指定成员”后，未列入的成员将无法检索或打开该知识库。',
+      canView: '可见',
+      canDownload: '可下载',
+      empty: '暂无成员',
+      saved: '已保存',
+      loadFailed: '加载权限失败',
+      saveFailed: '保存失败'
+    },
     tagAddAction: '添加标签',
     documentCount: '{count} 个文档',
     filters: '筛选',

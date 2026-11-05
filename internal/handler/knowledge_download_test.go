@@ -14,11 +14,13 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,6 +82,9 @@ func runBatchDownload(
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
+	if kb != nil && kb.CreatorID == "" {
+		kb.CreatorID = "user-1"
+	}
 	router := gin.New()
 	router.Use(middleware.ErrorHandler(), func(c *gin.Context) {
 		ctx := types.WithCaller(c.Request.Context(), types.Caller{
@@ -390,4 +395,93 @@ func TestBatchDownloadKnowledgePreservesFolderPaths(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, reader.File, 1)
 	require.Equal(t, "docs/spec/design.md", reader.File[0].Name)
+}
+
+// stubDownloadVisibility implements access.KBUserVisibilityResolver.
+type stubDownloadVisibility struct {
+	canDownload bool
+	canView     bool
+}
+
+func (s *stubDownloadVisibility) DecideKBIDs(
+	_ context.Context, kbIDs []string, _ string, _ types.TenantRole, _ bool,
+) (map[string]types.KBAccessDecision, error) {
+	out := make(map[string]types.KBAccessDecision, len(kbIDs))
+	for _, id := range kbIDs {
+		out[id] = types.KBAccessDecision{CanView: s.canView, CanDownload: s.canDownload}
+	}
+	return out, nil
+}
+
+func runBatchDownloadAs(
+	t *testing.T,
+	role types.TenantRole,
+	kb *types.KnowledgeBase,
+	resolver *stubDownloadVisibility,
+	ids []string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.ErrorHandler(), func(c *gin.Context) {
+		ctx := types.WithCaller(c.Request.Context(), types.Caller{
+			TenantID: 7, UserID: "user-1", Role: role,
+		})
+		ctx = types.WithExecutionTenant(ctx, 7)
+		if resolver != nil {
+			ctx = access.WithKBUserVisibilityResolver(ctx, resolver)
+		}
+		c.Request = c.Request.WithContext(ctx)
+		c.Set(types.TenantIDContextKey.String(), uint64(7))
+		c.Set(types.UserIDContextKey.String(), "user-1")
+		c.Next()
+	})
+	svc := &downloadKnowledgeStub{
+		items: []*types.Knowledge{{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "stored-a"}},
+		names: map[string]string{"a": "a.pptx"},
+	}
+	h := &KnowledgeHandler{
+		kgService:      svc,
+		kbService:      &downloadKBStub{kb: kb},
+		kbShareService: &downloadShareStub{permission: types.OrgRoleEditor},
+	}
+	router.POST("/knowledge-bases/:id/knowledge/batch-download", h.BatchDownloadKnowledge)
+	body, err := json.Marshal(BatchDownloadKnowledgeRequest{IDs: ids})
+	require.NoError(t, err)
+	req := httptest.NewRequest(
+		http.MethodPost, "/knowledge-bases/kb-1/knowledge/batch-download", bytes.NewReader(body),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	return w
+}
+
+func TestBatchDownloadDeniesContributorWithoutGrant(t *testing.T) {
+	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "someone-else", VisibilityMode: "tenant"}
+	w := runBatchDownloadAs(t, types.TenantRoleContributor, kb, nil, []string{"a"})
+	require.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "denied_ids")
+}
+
+func TestBatchDownloadAllowsCreator(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "user-1", VisibilityMode: "restricted"}
+	w := runBatchDownloadAs(t, types.TenantRoleViewer, kb, nil, []string{"a"})
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestBatchDownloadAllowsAdmin(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "someone-else", VisibilityMode: "restricted"}
+	w := runBatchDownloadAs(t, types.TenantRoleAdmin, kb, nil, []string{"a"})
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestBatchDownloadAllowsGrantedViewer(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "someone-else", VisibilityMode: "restricted"}
+	resolver := &stubDownloadVisibility{canView: true, canDownload: true}
+	w := runBatchDownloadAs(t, types.TenantRoleViewer, kb, resolver, []string{"a"})
+	require.Equal(t, http.StatusOK, w.Code)
 }

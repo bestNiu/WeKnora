@@ -856,6 +856,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     image_processing_config TEXT NOT NULL DEFAULT '{}',
     embedding_model_id VARCHAR(64) NOT NULL,
     summary_model_id VARCHAR(64) NOT NULL,
+    visibility_mode VARCHAR(16) NOT NULL DEFAULT 'tenant',
     cos_config TEXT NOT NULL DEFAULT '{}',
     storage_provider_config TEXT DEFAULT NULL,
     vlm_config TEXT NOT NULL DEFAULT '{}',

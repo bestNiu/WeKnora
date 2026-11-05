@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"errors"
 	"time"
 
@@ -104,6 +105,28 @@ func (r *resourceRepository) GetActiveByContentHash(
 func (r *resourceRepository) MarkDeleted(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&types.StoredResource{}).Where("id = ?", id).
 		Updates(map[string]interface{}{"state": types.ResourceStateDeleted, "deleted_at": time.Now()}).Error
+}
+
+// SourceFileKnowledgeBases returns the knowledge bases whose original source
+// file is resourceID. Extracted images and generated assets have no
+// source_file binding and therefore return an empty list.
+func (r *resourceRepository) SourceFileKnowledgeBases(
+	ctx context.Context, tenantID uint64, resourceID string,
+) ([]string, error) {
+	if resourceID == "" || tenantID == 0 {
+		return nil, nil
+	}
+	var kbIDs []string
+	err := r.db.WithContext(ctx).Model(&types.ResourceBinding{}).
+		Joins("JOIN knowledges k ON k.id = resource_bindings.owner_id AND k.deleted_at IS NULL").
+		Where("resource_bindings.resource_id = ? AND resource_bindings.tenant_id = ? "+
+			"AND resource_bindings.owner_type = ? AND resource_bindings.relation = ?",
+			resourceID, tenantID, "knowledge", "source_file").
+		Distinct().Pluck("k.knowledge_base_id", &kbIDs).Error
+	if err != nil {
+		return nil, fmt.Errorf("source file knowledge bases: %w", err)
+	}
+	return kbIDs, nil
 }
 
 func (r *resourceRepository) CreateBinding(ctx context.Context, binding *types.ResourceBinding) error {

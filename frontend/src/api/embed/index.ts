@@ -21,6 +21,8 @@ export interface EmbedChannel {
   default_locale?: string
   webhook_url?: string
   has_webhook_secret?: boolean
+  /** User this bot acts as for per-user KB access. */
+  owner_user_id?: string
   publish_token?: string
   created_at: string
   updated_at: string

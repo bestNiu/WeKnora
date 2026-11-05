@@ -172,6 +172,22 @@ func (r *knowledgeBaseRepository) UpdateKnowledgeBase(ctx context.Context, kb *t
 	return r.db.WithContext(ctx).Save(kb).Error
 }
 
+// UpdateKnowledgeBaseVisibilityMode writes only visibility_mode.
+//
+// A dedicated column update keeps a concurrent settings save or profile
+// generation from overwriting (or being overwritten by) an access-policy
+// change, which is the same reasoning as
+// UpdateKnowledgeBaseGeneratedProfile.
+func (r *knowledgeBaseRepository) UpdateKnowledgeBaseVisibilityMode(
+	ctx context.Context, id string, mode string,
+) error {
+	if id == "" {
+		return errors.New("knowledge base ID cannot be empty")
+	}
+	return r.db.WithContext(ctx).Model(&types.KnowledgeBase{}).
+		Where("id = ?", id).Update("visibility_mode", mode).Error
+}
+
 // UpdateKnowledgeBaseGeneratedProfile writes the generated_profile column
 // only. The rest of the row is left untouched so a settings save that lands
 // while a profile is being generated is not overwritten by the worker.

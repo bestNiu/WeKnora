@@ -6,20 +6,22 @@
         </div>
         <!-- WeKnora 助手：停靠时作为布局右栏挤压页面，悬浮时浮在页面上；都不加遮罩，
              跨页面保留会话，从侧栏、右侧边缘按钮或命令面板唤出（设置里可选） -->
-        <AssistantPanel />
-        <AssistantLauncher />
-        <AssistantPageBridge />
+        <template v-if="!authStore.isPortalMode">
+            <AssistantPanel />
+            <AssistantLauncher />
+            <AssistantPageBridge />
+        </template>
         <div class="upload-mask" v-show="ismask">
             <UploadMask></UploadMask>
         </div>
         <!-- 全局设置模态框，供所有 platform 子路由使用 -->
-        <Settings />
-        <!-- 全局命令面板 (⌘K)，随 platform 路由存活 -->
-        <GlobalCommandPalette />
+        <Settings v-if="!authStore.isPortalMode" />
+        <!-- 全局命令面板 (⌘K)，随 platform 路由存活：门户模式关闭（能搜到知识库/智能体） -->
+        <GlobalCommandPalette v-if="!authStore.isPortalMode" />
         <!-- 知识库文件上传进度浮层：上传队列放在 store 里，切换页面不中断 -->
-        <UploadTasksPanel />
+        <UploadTasksPanel v-if="!authStore.isPortalMode" />
         <!-- 带遮罩层的新手引导：首次进入自动开启，可从用户菜单顶部昵称旁帮助按钮重新打开 -->
-        <NewUserGuide />
+        <NewUserGuide v-if="!authStore.isPortalMode" />
     </div>
 </template>
 <script setup lang="ts">
@@ -37,6 +39,7 @@ import NewUserGuide from '@/components/NewUserGuide.vue'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -46,6 +49,7 @@ const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
 const uiStore = useUIStore();
+const authStore = useAuthStore();
 let ismask = ref(false)
 const { t } = useI18n();
 

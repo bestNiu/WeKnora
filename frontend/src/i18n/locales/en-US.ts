@@ -211,7 +211,10 @@ export default {
         read_only: 'Only reads; changes nothing.',
         confirm: 'Each change pauses the run for your approval. Recurring ones can be allowed for good in the details.',
         auto_write: 'Reversible changes run directly; deletions and similar still pause for approval.',
-      },
+ 
+      backfill: 'Generate all previews',
+      backfillQueued: 'Queued {count} documents',
+      backfillStats: 'Ready {ready} · Pending {pending} · Failed {failed}',     },
     },
     schedule: {
       kinds: {
@@ -881,6 +884,20 @@ export default {
     sharedTooltip: 'Accessed from an external workspace via a shared space'
   },
   knowledgeBase: {
+    access: {
+      title: 'Members and access',
+      hint: 'Control who can see this knowledge base and who can download its original files. Download is independent of visibility.',
+      visibility: 'Visibility',
+      modeTenant: 'Whole workspace',
+      modeRestricted: 'Selected members',
+      restrictedHint: 'Unlisted members will no longer be able to search or open this knowledge base.',
+      canView: 'Visible',
+      canDownload: 'Download',
+      empty: 'No members yet',
+      saved: 'Saved',
+      loadFailed: 'Failed to load access',
+      saveFailed: 'Failed to save access'
+    },
     tagAddAction: 'Add tags',
     documentCount: '{count} document | {count} documents',
     filters: 'Filters',
@@ -7148,8 +7165,8 @@ export default {
     },
     entityLink: {
       kb: 'Knowledge base',
-      doc: 'Document',
-      chunk: 'Passage'
+      doc: 'Document: click to preview in the side panel, Ctrl/⌘-click for a new tab',
+      chunk: 'Passage: click to preview in the side panel, Ctrl/⌘-click for a new tab'
     },
     toolSummary: {
       getDocument: 'Get document: {title}',

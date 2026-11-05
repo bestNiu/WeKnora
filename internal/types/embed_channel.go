@@ -15,6 +15,7 @@ type EmbedChannel struct {
 	TenantID               uint64         `json:"tenant_id"           gorm:"not null;index:idx_embed_channels_tenant"`
 	AgentID                string         `json:"agent_id"            gorm:"type:varchar(36);not null;index:idx_embed_channels_agent;default:'builtin-quick-answer'"`
 	Name                   string         `json:"name"                gorm:"type:varchar(255);not null;default:''"`
+	OwnerUserID            string         `json:"owner_user_id,omitempty" gorm:"type:varchar(36);index"`
 	Enabled                bool           `json:"enabled"             gorm:"not null;default:true"`
 	PublishToken           string         `json:"-"                   gorm:"type:varchar(64);not null;default:''"`
 	AllowedOrigins         JSON           `json:"allowed_origins"     gorm:"type:jsonb;not null;default:'[]'" swaggertype:"array,string"`

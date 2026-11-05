@@ -424,6 +424,49 @@ CREATE TABLE IF NOT EXISTS user_kb_pins (
 CREATE INDEX IF NOT EXISTS idx_user_kb_pins_user_tenant_pinned_at
     ON user_kb_pins(tenant_id, user_id, pinned_at DESC);
 
+-- kb_user_access — sqlite mirror of migration 000134 (versioned).
+-- Per-(kb, user) visibility and download overrides. A KB is 'restricted'
+-- only when knowledge_bases.visibility_mode says so; these rows are always
+-- honoured as positive grants.
+CREATE TABLE IF NOT EXISTS kb_user_access (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    user_id VARCHAR(36) NOT NULL,
+    can_view BOOLEAN NOT NULL DEFAULT 1,
+    can_download BOOLEAN NOT NULL DEFAULT 0,
+    granted_by VARCHAR(36),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_user_access_kb_user
+    ON kb_user_access (knowledge_base_id, user_id)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_kb_user_access_tenant_user
+    ON kb_user_access (tenant_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_kb_user_access_kb
+    ON kb_user_access (knowledge_base_id);
+CREATE INDEX IF NOT EXISTS idx_kb_user_access_deleted_at
+    ON kb_user_access (deleted_at);
+
+-- knowledge_preview_artifacts — sqlite mirror of migration 000135.
+-- One derived-PDF preview row per knowledge item; doubles as render job state.
+CREATE TABLE IF NOT EXISTS knowledge_preview_artifacts (
+    knowledge_id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    storage_path TEXT NOT NULL DEFAULT '',
+    page_count INTEGER NOT NULL DEFAULT 0,
+    content_hash VARCHAR(64) NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (status IN ('pending', 'ready', 'failed'))
+);
+CREATE INDEX IF NOT EXISTS idx_preview_artifacts_tenant_status
+    ON knowledge_preview_artifacts (tenant_id, status);
+
 -- tenant_invitations — sqlite mirror of migration 000048. SQLite supports
 -- partial unique indexes too, so the same "one pending per (tenant,
 -- invitee)" guard can be applied verbatim.

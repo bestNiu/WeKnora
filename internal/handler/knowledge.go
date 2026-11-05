@@ -41,6 +41,11 @@ type KnowledgeHandler struct {
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
 	backlog           backlogProbe
+	// previewArtifacts renders and serves the derived PDF preview for Office
+	// documents. Nil disables derived previews (the original file is served).
+	previewArtifacts interfaces.PreviewArtifactService
+	// fileService opens the stored preview PDF.
+	fileService interfaces.FileService
 }
 
 // backlogProbe tells a backlogged document (work still queued) from a stuck
@@ -97,6 +102,8 @@ func NewKnowledgeHandler(
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
 	housekeeping *service.HousekeepingService,
+	previewArtifacts interfaces.PreviewArtifactService,
+	fileService interfaces.FileService,
 ) *KnowledgeHandler {
 	var backlog backlogProbe
 	if housekeeping != nil {
@@ -114,6 +121,8 @@ func NewKnowledgeHandler(
 		userSvc:           userSvc,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
+		previewArtifacts:  previewArtifacts,
+		fileService:       fileService,
 	}
 }
 
@@ -193,6 +202,11 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(
 	requiredPermission types.OrgMemberRole,
 ) (*types.Knowledge, context.Context, error) {
 	ctx := c.Request.Context()
+	// Fail closed when the lookup is not wired: a permission decision cannot be
+	// made, so the request never reaches file storage.
+	if h.kgService == nil {
+		return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
+	}
 	request := middleware.KBAccessRequest(c)
 	if request.Caller.TenantID == 0 {
 		return nil, ctx, errors.NewUnauthorizedError("Unauthorized")
@@ -665,6 +679,17 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewNotFoundError("Knowledge not found"))
 		return
+	}
+
+	// Per-user download permission for the KB's own workspace. The preview
+	// UI renders its download button from this flag, and the download route
+	// enforces the same decision server-side.
+	if caller := types.CallerFromContext(ctx); knowledge.TenantID == caller.TenantID {
+		if kb, kbErr := h.kbService.GetKnowledgeBaseByID(effCtx, knowledge.KnowledgeBaseID); kbErr == nil {
+			if allowed, dlErr := access.CanDownloadKB(effCtx, kb); dlErr == nil {
+				knowledge.CanDownload = allowed
+			}
+		}
 	}
 
 	logger.Infof(ctx, "Knowledge retrieved successfully, ID: %s, title: %s",
@@ -2061,10 +2086,34 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	// Keep a handler-level Editor check in addition to the route guard. The
 	// original file is more sensitive than parsed-content reads and must not
 	// be downloadable through a read-only organization share.
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
 		return
+	}
+	// Per-user download permission for the KB's own workspace. A Contributor
+	// no longer implies download, and a Viewer needs an explicit grant.
+	if caller := types.CallerFromContext(ctx); knowledge != nil && knowledge.TenantID == caller.TenantID {
+		// Fail closed without the KB lookup: the download decision cannot be
+		// made, and a Contributor no longer implies download.
+		if h.kbService == nil {
+			c.Error(errors.NewForbiddenError("没有该知识库的下载权限"))
+			return
+		}
+		kb, kbErr := h.kbService.GetKnowledgeBaseByID(effCtx, knowledge.KnowledgeBaseID)
+		if kbErr != nil {
+			c.Error(errors.NewInternalServerError("Failed to verify download permission"))
+			return
+		}
+		allowed, dlErr := access.CanDownloadKB(effCtx, kb)
+		if dlErr != nil {
+			c.Error(errors.NewInternalServerError("Failed to verify download permission"))
+			return
+		}
+		if !allowed {
+			c.Error(errors.NewForbiddenError("没有该知识库的下载权限"))
+			return
+		}
 	}
 	logger.Infof(ctx, "Retrieving knowledge file, ID: %s", secutils.SanitizeForLog(id))
 
@@ -2082,6 +2131,82 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to send file: %v", err)
 	}
+}
+
+// knowledgeToKB builds the minimal KB shape the access decision needs. The
+// handler has not loaded the KB row here; visibility mode defaults to tenant,
+// and a restricted KB still requires the grant through CanDownloadKB's owner
+// and grant rules.
+func knowledgeToKB(knowledge *types.Knowledge) *types.KnowledgeBase {
+	if knowledge == nil {
+		return nil
+	}
+	return &types.KnowledgeBase{ID: knowledge.KnowledgeBaseID, TenantID: knowledge.TenantID}
+}
+
+// previewPDFName derives the preview file name the browser shows.
+func previewPDFName(knowledge *types.Knowledge) string {
+	name := knowledge.FileName
+	if name == "" {
+		name = knowledge.Title
+	}
+	name = strings.TrimSuffix(name, "."+knowledge.FileType)
+	if name == "" {
+		name = knowledge.ID
+	}
+	return name + ".pdf"
+}
+
+// PreviewKnowledgeFileMeta godoc
+// @Summary      预览状态
+// @Description  返回预览产物的状态：pdf（已生成）、pending（生成中）、failed（失败）、original（原文件即预览）
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {object}  map[string]interface{}  "预览状态"
+// @Security     Bearer
+// @Router       /knowledge/{id}/preview/meta [get]
+func (h *KnowledgeHandler) PreviewKnowledgeFileMeta(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if !types.IsRenderablePreviewType(knowledge.FileType) || h.previewArtifacts == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"kind": "original"}})
+		return
+	}
+	var artifact *types.KnowledgePreviewArtifact
+	if c.Query("retry") == "1" {
+		artifact, err = h.previewArtifacts.Retry(effCtx, knowledge)
+	} else {
+		artifact, err = h.previewArtifacts.Ensure(effCtx, knowledge)
+	}
+	if err != nil {
+		c.Error(errors.NewInternalServerError("Failed to prepare preview"))
+		return
+	}
+	data := gin.H{"kind": "pending", "file_size": knowledge.FileSize}
+	if caller := types.CallerFromContext(ctx); knowledge.TenantID == caller.TenantID {
+		if allowed, dlErr := access.CanDownloadKB(effCtx, knowledgeToKB(knowledge)); dlErr == nil {
+			data["can_download"] = allowed
+		}
+	}
+	if artifact != nil {
+		data["page_count"] = artifact.PageCount
+		switch artifact.Status {
+		case types.PreviewArtifactReady:
+			data["kind"] = "pdf"
+		case types.PreviewArtifactFailed:
+			data["kind"] = "failed"
+			data["error"] = artifact.ErrorMessage
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+	_ = ctx
 }
 
 // PreviewKnowledgeFile godoc
@@ -2105,10 +2230,70 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
 	if err != nil {
 		c.Error(err)
 		return
+	}
+	// Office documents are served as the derived PDF only: the original file
+	// is the asset the download permission protects. Text, markdown, images and
+	// media are their own preview, so they keep serving the original bytes.
+	if h.previewArtifacts != nil && types.IsRenderablePreviewType(knowledge.FileType) {
+		// Explicit fallback for a failed render: only a caller who may download
+		// the source can ask for the original bytes, so the preview surface
+		// never becomes a download bypass.
+		if c.Query("fallback") == "original" {
+			allowed, dlErr := access.CanDownloadKB(effCtx, knowledgeToKB(knowledge))
+			if dlErr != nil || !allowed {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "download permission required"})
+				return
+			}
+			file, filename, openErr := h.kgService.GetKnowledgeFile(effCtx, id)
+			if openErr != nil {
+				c.Error(errors.NewInternalServerError("Failed to retrieve file"))
+				return
+			}
+			if serveErr := filetransport.Serve(c.Writer, c.Request, file, filetransport.Options{
+				Filename: filename, CacheControl: "private, no-store",
+			}); serveErr != nil {
+				logger.Errorf(ctx, "Failed to stream fallback original: %v", serveErr)
+			}
+			return
+		}
+		artifact, ensureErr := h.previewArtifacts.Ensure(effCtx, knowledge)
+		if ensureErr != nil {
+			c.Error(errors.NewInternalServerError("Failed to prepare preview"))
+			return
+		}
+		switch {
+		case artifact != nil && artifact.IsReady():
+			if h.fileService == nil {
+				c.Error(errors.NewInternalServerError("Preview storage is unavailable"))
+				return
+			}
+			reader, openErr := h.fileService.GetFile(effCtx, artifact.StoragePath)
+			if openErr != nil {
+				c.Error(errors.NewInternalServerError("Failed to open preview"))
+				return
+			}
+			if serveErr := filetransport.Serve(c.Writer, c.Request, reader, filetransport.Options{
+				Filename: previewPDFName(knowledge), ContentType: "application/pdf",
+				CacheControl: "private, no-store",
+			}); serveErr != nil {
+				logger.Errorf(ctx, "Failed to stream preview PDF: %v", serveErr)
+			}
+			return
+		case artifact != nil && artifact.Status == types.PreviewArtifactPending:
+			c.JSON(http.StatusAccepted, gin.H{"success": true, "data": gin.H{"status": "pending"}})
+			return
+		default:
+			message := "preview render failed"
+			if artifact != nil && artifact.ErrorMessage != "" {
+				message = artifact.ErrorMessage
+			}
+			c.JSON(http.StatusConflict, gin.H{"success": false, "error": message})
+			return
+		}
 	}
 
 	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
@@ -2550,6 +2735,104 @@ type ReparseKnowledgeRequest struct {
 // @x-agent      {"id":"knowledge.reparse","risk":"write","target":"knowledge.get","label":"title"}
 // @x-agent-hint "Runs in the background; follow it with knowledge.get_parse_progress. Search results change meanwhile."
 // @Router       /knowledge/{id}/reparse [post]
+// RebuildKnowledgeGraph enqueues graph extraction for every text chunk of one
+// knowledge document without re-parsing, re-chunking or re-embedding it.
+// Iterating a graph prompt, entity vocabulary or relation whitelist otherwise
+// forces a full reparse, which recomputes embeddings for the whole document —
+// the dominant cost of a graph-only experiment.
+// It is idempotent: extracted nodes merge on (name, knowledge) and relations
+// merge on (source, type, target).
+func (h *KnowledgeHandler) RebuildKnowledgeGraph(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start rebuilding knowledge graph")
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if knowledge.ParseStatus != types.ParseStatusCompleted && knowledge.ParseStatus != types.ParseStatusFinalizing {
+		c.Error(errors.NewBadRequestError("Knowledge must finish parsing before its graph can be rebuilt"))
+		return
+	}
+	kb, err := h.kbService.GetKnowledgeBaseByID(effCtx, knowledge.KnowledgeBaseID)
+	if err != nil || kb == nil {
+		c.Error(errors.NewNotFoundError("Knowledge base not found"))
+		return
+	}
+	if !kb.IsGraphEnabled() {
+		c.Error(errors.NewBadRequestError("Graph extraction is not enabled on this knowledge base"))
+		return
+	}
+
+	// Optional chunk_ids narrows the rebuild to a subset, e.g. the chunks whose
+	// earlier extraction failed, so a retry does not re-pay for the ones that
+	// already succeeded.
+	var req struct {
+		ChunkIDs []string `json:"chunk_ids"`
+	}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.Error(errors.NewBadRequestError("Invalid request body").WithDetails(err.Error()))
+			return
+		}
+	}
+	filter := make(map[string]struct{}, len(req.ChunkIDs))
+	for _, chunkID := range req.ChunkIDs {
+		filter[chunkID] = struct{}{}
+	}
+
+	chunks, err := h.chunkService.ListChunksByKnowledgeID(effCtx, knowledge.ID)
+	if err != nil {
+		logger.Errorf(effCtx, "list chunks for graph rebuild: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to list chunks").WithDetails(err.Error()))
+		return
+	}
+
+	enqueued, selected := 0, 0
+	for _, chunk := range chunks {
+		if chunk == nil || !chunk.IsEnabled || chunk.ChunkType != types.ChunkTypeText {
+			continue
+		}
+		if len(filter) > 0 {
+			if _, ok := filter[chunk.ID]; !ok {
+				continue
+			}
+		}
+		selected++
+		// The span name is derived from this index, so it must be the chunk's own
+		// position in the document, not the loop counter: a filtered rebuild
+		// would otherwise write spans under an index that no chunk owns and the
+		// chunk would look un-extracted forever (and be rebuilt again).
+		ok, enqueueErr := service.NewChunkExtractTask(
+			effCtx, h.asynqClient, knowledge.TenantID, chunk.ID, kb.SummaryModelID, knowledge.ID, 0, chunk.ChunkIndex,
+		)
+		if enqueueErr != nil {
+			logger.Warnf(effCtx, "enqueue graph extract for chunk %s: %v", chunk.ID, enqueueErr)
+			continue
+		}
+		if ok {
+			enqueued++
+		}
+	}
+
+	logger.Infof(ctx, "graph rebuild enqueued: knowledge=%s chunks=%d enqueued=%d", knowledge.ID, len(chunks), enqueued)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"knowledge_id": knowledge.ID,
+			"chunks":       len(chunks),
+			"selected":     selected,
+			"enqueued":     enqueued,
+		},
+	})
+}
+
 func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start re-parsing knowledge")

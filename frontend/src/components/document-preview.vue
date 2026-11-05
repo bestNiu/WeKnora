@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
 import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
-import { previewKnowledgeFile } from '@/api/knowledge-base/index';
+import { downKnowledgeDetails, getKnowledgePreviewMeta, previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
 import hljs from 'highlight.js';
@@ -69,6 +69,8 @@ const props = defineProps<{
   sourceMode?: boolean;
   /** Where to scroll and what to highlight once the file is rendered. */
   locate?: SourceLocateRequest | null;
+  /** Server-computed download permission for this knowledge item. */
+  canDownload?: boolean;
 }>();
 
 export type SourceLocateResult = { found: boolean; precise: boolean; granularity?: string; reason?: string };
@@ -88,6 +90,12 @@ onErrorCaptured((err) => {
   return false;
 });
 const previewType = ref<FilePreviewKind>('unsupported');
+// True when the backend served the derived PDF instead of the original file
+// (Office documents). The blob is a PDF even though the document extension is
+// .pptx/.docx, so the renderer must not run the OOXML path on it.
+const knowledgePreviewIsPdf = ref(false);
+// Set by the retry button: the next meta request forces a new render.
+const previewRetryPending = ref(false);
 const blobUrl = ref('');
 const textContent = ref('');
 const highlightedCode = ref('');
@@ -414,10 +422,68 @@ function allowsHtmlScriptPreview(): boolean {
   return getPreviewSourceKey().startsWith('artifact:');
 }
 
-async function fetchPreviewBlob(): Promise<Blob> {
+// Office documents are previewed from a derived PDF that the backend renders
+// on first open (a 56 MB deck takes ~60 s). Ask for its state first so the
+// panel shows progress instead of fetching a 202/409 body as if it were a file.
+// `original` means the file is its own preview (text, markdown, images, media).
+async function awaitKnowledgePreview(forceRetry = false): Promise<Blob> {
+  const id = props.knowledgeId as string;
+  const deadline = Date.now() + 180_000;
+  let lastError = '';
+  while (Date.now() < deadline) {
+    let kind = 'original';
+    try {
+      const res: any = await getKnowledgePreviewMeta(id, forceRetry);
+      kind = res?.data?.kind || 'original';
+      lastError = res?.data?.error || '';
+    } catch {
+      // A meta lookup failure must not block the preview; fall through to the
+      // original-file path, which re-checks access server-side.
+      return previewKnowledgeFile(id);
+    }
+    if (kind === 'pdf' || kind === 'original') {
+      knowledgePreviewIsPdf.value = kind === 'pdf';
+      return previewKnowledgeFile(id);
+    }
+    if (kind === 'failed') {
+      // Last resort in the chain: a caller who may download the source can
+      // render it client-side. Everyone else gets the error and the retry
+      // button (the server refuses ?fallback=original without the grant).
+      const meta: any = await getKnowledgePreviewMeta(id).then((r: any) => r?.data || {}).catch(() => ({}));
+      if (meta.can_download && (meta.file_size || 0) <= 20 * 1024 * 1024) {
+        knowledgePreviewIsPdf.value = false;
+        return previewKnowledgeFile(id, true);
+      }
+      throw new Error(lastError || t('preview.loadFailed'));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error(t('preview.loadFailed'));
+}
+
+// Downloads the source file. The button only renders when the server says the
+// caller may download, and the download route enforces the same decision.
+async function downloadOriginal() {
+  if (!props.knowledgeId) return;
+  try {
+    const blob = await downKnowledgeDetails(props.knowledgeId);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = props.fileName || props.knowledgeId || 'download';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('Failed to download the original file:', err);
+  }
+}
+
+async function fetchPreviewBlob(forceRetry = false): Promise<Blob> {
   if (props.sourceBlob) return props.sourceBlob;
   if (props.knowledgeId) {
-    return previewKnowledgeFile(props.knowledgeId);
+    return awaitKnowledgePreview(forceRetry);
   }
   if (props.sessionId && props.attachmentId) {
     return previewTemporaryAttachment(props.sessionId, props.attachmentId);
@@ -462,11 +528,17 @@ async function loadPreview() {
   error.value = '';
   htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
 
+  // Reset per load: a later preview of the same component may be the original
+  // file (attachments, artifacts) and must use its own renderer.
+  knowledgePreviewIsPdf.value = false;
   let ft = resolveFilePreviewExt(props.fileName, props.fileType);
   previewType.value = resolvePreviewKind(ft);
 
+  const forceRetry = previewRetryPending.value;
+  previewRetryPending.value = false;
   try {
-    const rawBlob = await fetchPreviewBlob();
+    const rawBlob = await fetchPreviewBlob(forceRetry);
+    if (props.knowledgeId && knowledgePreviewIsPdf.value) ft = 'pdf';
     let kind = resolvePreviewKind(ft);
     if (kind === 'unsupported') {
       const sample = new Uint8Array(await rawBlob.slice(0, FILE_PREVIEW_SNIFF_BYTES).arrayBuffer());
@@ -922,6 +994,14 @@ onUnmounted(() => {
           >
             <template #icon><t-icon :name="htmlViewMode === 'render' ? 'code' : 'browse'" /></template>
           </t-button>
+          <t-button
+            v-if="canDownload && knowledgeId && !sourceBlob"
+            theme="default" variant="text" size="small" shape="square"
+            :title="$t('common.download')" :aria-label="$t('common.download')"
+            @click="downloadOriginal"
+          >
+            <template #icon><t-icon name="download" /></template>
+          </t-button>
           <t-button theme="default" variant="text" size="small" shape="square" :aria-pressed="isFullscreen"
             :title="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
             :aria-label="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
@@ -942,9 +1022,19 @@ onUnmounted(() => {
     <div v-else-if="error" class="preview-error">
       <t-icon name="error-circle" size="48px" />
       <p>{{ error }}</p>
-      <t-button theme="primary" size="small" @click="loadedForId = ''; loadPreview()">
-        {{ $t('preview.retry') }}
-      </t-button>
+      <div class="preview-error__actions">
+        <t-button theme="primary" size="small" @click="previewRetryPending = true; loadedForId = ''; loadPreview()">
+          {{ $t('preview.retry') }}
+        </t-button>
+        <!-- A failed render must still offer the source file to a caller who
+             may download it; the server re-checks the same permission. -->
+        <t-button
+          v-if="canDownload && knowledgeId && !sourceBlob"
+          theme="default" size="small" @click="downloadOriginal"
+        >
+          {{ $t('common.download') }}
+        </t-button>
+      </div>
     </div>
 
     <!-- Unsupported -->
@@ -1264,6 +1354,12 @@ onUnmounted(() => {
   padding: 60px 20px;
   gap: 16px;
   .loading-text { color: @text-tertiary; font-size: var(--app-text-base); }
+}
+
+.preview-error__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .preview-error {

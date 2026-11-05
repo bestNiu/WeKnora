@@ -211,7 +211,10 @@ export default {
         read_only: '읽기만 하고 아무것도 변경하지 않습니다.',
         confirm: '변경할 때마다 일시 중지하고 승인을 요청합니다. 자주 쓰는 작업은 상세에서 상시 승인할 수 있습니다.',
         auto_write: '되돌릴 수 있는 변경은 바로 실행하고, 삭제 등은 여전히 승인을 기다립니다.',
-      },
+ 
+      backfill: '모든 미리보기 생성',
+      backfillQueued: '{count}개 문서를 대기열에 추가했습니다',
+      backfillStats: '준비 {ready} · 진행 중 {pending} · 실패 {failed}',     },
     },
     schedule: {
       kinds: {
@@ -7931,6 +7934,20 @@ export default {
     }
   },
   knowledgeBase: {
+    access: {
+      title: '구성원 및 권한',
+      hint: '이 지식 베이스를 볼 수 있는 사람과 원본 파일을 내려받을 수 있는 사람을 제어합니다. 다운로드는 가시성과 별개입니다.',
+      visibility: '가시 범위',
+      modeTenant: '전체 워크스페이스',
+      modeRestricted: '지정 구성원',
+      restrictedHint: '지정 구성원으로 전환하면 목록에 없는 구성원은 이 지식 베이스를 검색하거나 열 수 없습니다.',
+      canView: '보기',
+      canDownload: '다운로드',
+      empty: '구성원 없음',
+      saved: '저장됨',
+      loadFailed: '권한을 불러오지 못했습니다',
+      saveFailed: '저장하지 못했습니다'
+    },
     tagAddAction: '태그 추가',
     documentCount: '문서 {count}개',
     filters: '필터',

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,6 +66,16 @@ func localStorageBaseDir() string {
 func localStorageAbsDir() string {
 	absDir, _ := filepath.Abs(localStorageBaseDir())
 	return absDir
+}
+
+// isImageFileName reports whether a stored file is a renderable image, which
+// the preview and content-image proxies may serve to read-only members.
+func isImageFileName(name string) bool {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico", ".avif":
+		return true
+	}
+	return false
 }
 
 // parseStorageTarget splits a stored file path into its optional storage
@@ -161,6 +172,7 @@ func streamStoredFile(c *gin.Context, reader io.ReadCloser, contentType string, 
 func newFileServeHandler(
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	kbService interfaces.KnowledgeBaseService,
 	resourceCatalogs ...interfaces.ResourceCatalog,
 ) gin.HandlerFunc {
 	resourceCatalog := firstResourceCatalog(resourceCatalogs)
@@ -182,8 +194,12 @@ func newFileServeHandler(
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 			return
 		}
+		reference := filePath
 		filePath, resourceResolved, ok := resolveCatalogResource(c, resourceCatalog, filePath, tenant.ID)
 		if !ok {
+			return
+		}
+		if !authorizeTenantFileDownload(c, resourceCatalog, kbService, reference) {
 			return
 		}
 
@@ -216,9 +232,55 @@ func newFileServeHandler(
 			return
 		}
 
+		// Paths are validated for tenant ownership first. Original document
+		// files additionally require the per-KB download grant (see
+		// authorizeTenantFileDownload); extracted images and generated assets
+		// have no source_file binding and stay readable.
 		contentType, inline := secutils.SafeContentTypeByFilename(filePath)
 		streamStoredFile(c, reader, contentType, inline, "public, max-age=86400", "/files", filePath)
 	}
+}
+
+// authorizeTenantFileDownload keeps the tenant raw-storage proxy from serving
+// a document's ORIGINAL file to a caller without the per-KB download grant.
+// Extracted images and generated assets have no source_file binding and stay
+// readable, so previews keep working.
+func authorizeTenantFileDownload(
+	c *gin.Context,
+	catalog interfaces.ResourceCatalog,
+	kbService interfaces.KnowledgeBaseService,
+	reference string,
+) bool {
+	lookup, ok := catalog.(interface {
+		SourceFileKnowledgeBases(context.Context, uint64, string) ([]string, error)
+	})
+	if !ok || kbService == nil {
+		return true
+	}
+	tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
+		return false
+	}
+	kbIDs, err := lookup.SourceFileKnowledgeBases(c.Request.Context(), tenant.ID, reference)
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{"file_path": reference})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify download permission"})
+		return false
+	}
+	for _, kbID := range kbIDs {
+		kb, kbErr := kbService.GetKnowledgeBaseByID(c.Request.Context(), kbID)
+		if kbErr != nil || kb == nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: download permission required"})
+			return false
+		}
+		allowed, dlErr := access.CanDownloadKB(c.Request.Context(), kb)
+		if dlErr != nil || !allowed {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: download permission required"})
+			return false
+		}
+	}
+	return true
 }
 
 func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService, resolvers ...interfaces.StorageBackendResolver) {
@@ -226,7 +288,7 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService, r
 	if len(resolvers) > 0 {
 		storageResolver = resolvers[0]
 	}
-	serveFilesWithResources(r, globalFileService, storageResolver, nil)
+	serveFilesWithResources(r, globalFileService, storageResolver, nil, nil)
 }
 
 // serveFilesWithResources registers the tenant-scoped storage proxy.
@@ -239,6 +301,7 @@ func serveFilesWithResources(
 	r getRouteRegistrar,
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	kbService interfaces.KnowledgeBaseService,
 	resourceCatalog interfaces.ResourceCatalog,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving files from /files")
@@ -251,7 +314,7 @@ func serveFilesWithResources(
 	r.GET(
 		"/files",
 		middleware.AllowFileServeAPIKey(),
-		newFileServeHandler(globalFileService, storageResolver, resourceCatalog),
+		newFileServeHandler(globalFileService, storageResolver, kbService, resourceCatalog),
 	)
 }
 
@@ -377,6 +440,20 @@ func newKBScopedFileServeHandlerWithResources(
 		)
 		if fileAccessError(c, err) {
 			return
+		}
+		// This proxy exists for content images rendered inside a KB. A
+		// non-image resource is the document's own file, so serving it without
+		// the per-KB download permission would bypass the download guard.
+		if grant != nil && grant.KnowledgeBase != nil && !isImageFileName(file.Filename) {
+			allowed, dlErr := access.CanDownloadKB(c.Request.Context(), grant.KnowledgeBase)
+			if dlErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify download permission"})
+				return
+			}
+			if !allowed {
+				c.JSON(http.StatusForbidden, gin.H{"error": "download permission required for this file"})
+				return
+			}
 		}
 		serveAuthorizedFile(c, file, tenantService, globalFileService, storageResolver, "KB files")
 	}

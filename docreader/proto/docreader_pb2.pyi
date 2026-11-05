@@ -6,6 +6,28 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class RenderRequest(_message.Message):
+    __slots__ = ("file_content", "file_name", "file_type", "request_id")
+    FILE_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    FILE_NAME_FIELD_NUMBER: _ClassVar[int]
+    FILE_TYPE_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    file_content: bytes
+    file_name: str
+    file_type: str
+    request_id: str
+    def __init__(self, file_content: _Optional[bytes] = ..., file_name: _Optional[str] = ..., file_type: _Optional[str] = ..., request_id: _Optional[str] = ...) -> None: ...
+
+class RenderResponse(_message.Message):
+    __slots__ = ("pdf", "page_count", "error")
+    PDF_FIELD_NUMBER: _ClassVar[int]
+    PAGE_COUNT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    pdf: bytes
+    page_count: int
+    error: str
+    def __init__(self, pdf: _Optional[bytes] = ..., page_count: _Optional[int] = ..., error: _Optional[str] = ...) -> None: ...
+
 class PreprocessImageRequest(_message.Message):
     __slots__ = ("image",)
     IMAGE_FIELD_NUMBER: _ClassVar[int]

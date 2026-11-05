@@ -507,6 +507,7 @@ func attachPlatformAPIKeyAuthContext(c *gin.Context, key *types.TenantAPIKey) {
 			ScopeType:    types.APIKeyScopePlatform,
 			FullAccess:   false,
 			Capabilities: key.Capabilities,
+			OwnerUserID:  key.OwnerUserID,
 		},
 		AuthSource: types.AuthSourceAPIPlatformKey,
 	})
@@ -599,6 +600,7 @@ func attachAPIKeyAuthContext(
 			FullAccess:       fullAccess,
 			KnowledgeBaseIDs: key.KnowledgeBaseIDs,
 			Capabilities:     key.Capabilities,
+			OwnerUserID:      key.OwnerUserID,
 		}
 	}
 	applyAuthSession(c, session)

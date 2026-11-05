@@ -2,6 +2,7 @@ package docparser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -256,6 +257,32 @@ func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 // PreprocessImage straightens and crops a photographed page before OCR runs.
 // The docreader does the work; a page it declines to improve comes back as
 // fallback=true with no bytes, which the caller reads as "use the original".
+// RenderToPDF converts an Office document to PDF through the docreader's
+// LibreOffice runtime. The PDF is a preview artifact; callers must not treat it
+// as the source file for download permissions.
+func (p *GRPCDocumentReader) RenderToPDF(
+	ctx context.Context, content []byte, fileName, fileType string,
+) ([]byte, int32, error) {
+	if p.client == nil {
+		return nil, 0, errors.New("docreader client is not connected")
+	}
+	resp, err := p.client.Render(ctx, &proto.RenderRequest{
+		FileContent: content,
+		FileName:    fileName,
+		FileType:    fileType,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("docreader render: %w", err)
+	}
+	if resp.GetError() != "" {
+		return nil, 0, errors.New(resp.GetError())
+	}
+	if len(resp.GetPdf()) == 0 {
+		return nil, 0, errors.New("docreader returned an empty PDF")
+	}
+	return resp.GetPdf(), resp.GetPageCount(), nil
+}
+
 func (p *GRPCDocumentReader) PreprocessImage(ctx context.Context, image []byte) ([]byte, bool, error) {
 	p.mu.RLock()
 	client := p.client

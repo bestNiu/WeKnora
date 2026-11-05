@@ -181,6 +181,24 @@ export const useAuthStore = defineStore('auth', () => {
     return (ROLE_LEVEL[currentTenantRole.value] ?? 0) >= ROLE_LEVEL[min]
   }
 
+  // isPortalMode marks the trimmed-down "portal" experience used by ordinary
+  // workspace members: only the chat surface is reachable, every management
+  // menu is hidden.
+  //
+  // It is deliberately keyed on the *known* non-admin roles rather than on
+  // `!hasRole('admin')`. currentTenantRole is '' until memberships hydrate from
+  // localStorage / /auth/me, and treating "unknown" as portal mode would make
+  // the sidebar flash between two different layouts on every reload — and
+  // briefly hide the management menu from an admin.
+  //
+  // SECURITY: UI-only, exactly like currentTenantRole above. A user who edits
+  // localStorage to "admin" only reveals menu entries; the server still
+  // returns 403 on every management endpoint.
+  const isPortalMode = computed(() => {
+    const role = currentTenantRole.value
+    return role === 'viewer' || role === 'contributor'
+  })
+
   const effectiveTenantId = computed(() => {
     // 如果选择了其他空间，使用选择的空间ID，否则使用用户默认空间ID
     return selectedTenantId.value || (tenant.value?.id ? Number(tenant.value.id) : null)
@@ -595,6 +613,7 @@ export const useAuthStore = defineStore('auth', () => {
     isSystemAdmin,
     currentTenantRole,
     hasRole,
+    isPortalMode,
     effectiveTenantId,
     isLiteMode,
 

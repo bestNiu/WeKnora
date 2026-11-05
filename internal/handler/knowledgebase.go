@@ -583,7 +583,15 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	storeView := h.resolveKBStoreView(c.Request.Context(), kb, tenantID)
-	var extras map[string]interface{}
+	extras := map[string]interface{}{}
+	if kb.TenantID == tenantID {
+		// KB-level download permission for the preview/download buttons. For a
+		// foreign shared KB the share grant stays the authority, so it is not
+		// reported here.
+		if allowed, dlErr := access.CanDownloadKB(c.Request.Context(), kb); dlErr == nil {
+			extras = map[string]interface{}{"can_download": allowed}
+		}
+	}
 	if kb.TenantID != tenantID && permission != "" {
 		// Include my_permission in data so frontend can show role (e.g. "只读") instead of "--" for agent-visible KBs
 		extras = map[string]interface{}{"my_permission": permission}

@@ -75,6 +75,10 @@ func (f *fakeRegistry) GetOrLoadByStoreID(
 // CreateKnowledgeBase + CopyKnowledgeBase tests. It stores rows in a map
 // keyed by ID. No tenant scoping is applied — the tested paths already
 // enforce that explicitly.
+func (r *fakeKBRepo) UpdateKnowledgeBaseVisibilityMode(context.Context, string, string) error {
+	return nil
+}
+
 type fakeKBRepo struct {
 	rows      map[string]*types.KnowledgeBase
 	createErr error

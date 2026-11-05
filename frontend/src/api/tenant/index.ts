@@ -101,6 +101,8 @@ export interface TenantAPIKey {
   full_access: boolean
   knowledge_base_ids: string[] | null
   capabilities?: TenantAPIKeyCapability[]
+  /** User the key acts as for per-user KB access. */
+  owner_user_id?: string
   last_used_at?: string
   expires_at?: string
   created_at: string
@@ -111,6 +113,8 @@ export interface CreatedTenantAPIKey extends TenantAPIKey {
 }
 
 export interface CreateTenantAPIKeyPayload {
+  /** User the key acts as for per-user KB access. */
+  owner_user_id?: string
   name: string
   full_access?: boolean
   knowledge_base_ids?: string[]
@@ -119,6 +123,8 @@ export interface CreateTenantAPIKeyPayload {
 }
 
 export interface UpdateTenantAPIKeyPayload {
+  /** User the key acts as for per-user KB access. */
+  owner_user_id?: string
   name: string
   full_access: boolean
   knowledge_base_ids: string[]
@@ -153,7 +159,7 @@ export interface SearchTenantsResponse {
 export async function listAllTenants(): Promise<{ success: boolean; data?: { items: TenantInfo[] }; message?: string }> {
   try {
     const response = await get('/api/v1/tenants/all')
-    return response as unknown as { success: boolean; data?: { items: TenantInfo[] }; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; data?: { items: TenantInfo[] }; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -167,7 +173,7 @@ export async function getAPIPrincipalConfig(
 ): Promise<{ success: boolean; data?: APIPrincipalConfig; message?: string }> {
   try {
     const response = await get(`/api/v1/tenants/${tenantId}/api-principal-config`)
-    return response as unknown as { success: boolean; data?: APIPrincipalConfig; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; data?: APIPrincipalConfig; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -182,7 +188,7 @@ export async function updateAPIPrincipalConfig(
 ): Promise<{ success: boolean; data?: APIPrincipalConfig; message?: string }> {
   try {
     const response = await put(`/api/v1/tenants/${tenantId}/api-principal-config`, payload)
-    return response as unknown as { success: boolean; data?: APIPrincipalConfig; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; data?: APIPrincipalConfig; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -197,7 +203,7 @@ export async function createAPIPrincipalTestToken(
 ): Promise<{ success: boolean; data?: APIPrincipalTestToken; message?: string }> {
   try {
     const response = await post(`/api/v1/tenants/${tenantId}/api-principal-test-token`, payload)
-    return response as unknown as { success: boolean; data?: APIPrincipalTestToken; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; data?: APIPrincipalTestToken; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -211,7 +217,7 @@ export async function listTenantAPIKeys(
 ): Promise<{ success: boolean; data?: TenantAPIKey[]; message?: string }> {
   try {
     const response = await get(`/api/v1/tenants/${tenantId}/api-keys`)
-    return response as unknown as { success: boolean; data?: TenantAPIKey[]; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; data?: TenantAPIKey[]; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -226,7 +232,7 @@ export async function createTenantAPIKey(
 ): Promise<{ success: boolean; data?: CreatedTenantAPIKey; message?: string }> {
   try {
     const response = await post(`/api/v1/tenants/${tenantId}/api-keys`, payload)
-    return response as unknown as { success: boolean; data?: CreatedTenantAPIKey; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; data?: CreatedTenantAPIKey; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -243,7 +249,7 @@ export async function updateTenantAPIKey(
 ): Promise<{ success: boolean; data?: TenantAPIKey; message?: string }> {
   try {
     const response = await put(`/api/v1/tenants/${tenantId}/api-keys/${keyId}`, payload)
-    return response as unknown as { success: boolean; data?: TenantAPIKey; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; data?: TenantAPIKey; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -258,7 +264,7 @@ export async function deleteTenantAPIKey(
 ): Promise<{ success: boolean; message?: string }> {
   try {
     const response = await del(`/api/v1/tenants/${tenantId}/api-keys/${keyId}`)
-    return response as unknown as { success: boolean; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -279,7 +285,7 @@ export async function updateTenant(
 ): Promise<{ success: boolean; data?: TenantInfo; message?: string }> {
   try {
     const response = await put(`/api/v1/tenants/${tenantId}`, payload)
-    return response as unknown as { success: boolean; data?: TenantInfo; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; data?: TenantInfo; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -296,7 +302,7 @@ export async function deleteTenant(
 ): Promise<{ success: boolean; message?: string }> {
   try {
     const response = await del(`/api/v1/tenants/${tenantId}`)
-    return response as unknown as { success: boolean; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,
@@ -316,7 +322,7 @@ export async function createTenant(
 ): Promise<{ success: boolean; data?: TenantInfo; message?: string }> {
   try {
     const response = await post('/api/v1/tenants', payload)
-    return response as unknown as { success: boolean; data?: TenantInfo; message?: string }
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as { success: boolean; data?: TenantInfo; message?: string } // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     const code = error?.error?.code ?? error?.code
     return {
@@ -350,7 +356,7 @@ export async function searchTenants(params: SearchTenantsParams = {}): Promise<S
     const queryString = queryParams.toString()
     const url = `/api/v1/tenants/search${queryString ? '?' + queryString : ''}`
     const response = await get(url)
-    return response as unknown as SearchTenantsResponse
+    return /* SAFETY: the HTTP helper returns a parsed JSON envelope; this cast restores the server-owned response contract. */ response as unknown as SearchTenantsResponse // SAFETY: the HTTP helper returns a parsed JSON envelope; the cast restores the server-owned response contract.
   } catch (error: any) {
     return {
       success: false,

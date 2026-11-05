@@ -56,22 +56,27 @@ func HasKBGrant(ctx context.Context, kbID string, tenantID uint64, required type
 		grant.scope.Allows(kbID, tenantID)
 }
 
-// KBPermissions combines caller ownership, exact context grants and organization
-// shares for one service operation. Pass nil shares when that entry point does
-// not permit organization expansion (for example, a caller without a user).
+// KBPermissions combines caller ownership, exact context grants, per-user
+// visibility and organization shares for one service operation. Pass nil shares
+// when that entry point does not permit organization expansion (for example, a
+// caller without a user).
 type KBPermissions struct {
 	ctx    context.Context
 	caller types.Caller
 	shares *KBSharePermissions
+	// visibility caches per-user visibility decisions for this operation so a
+	// page of documents from one KB costs one resolver call.
+	visibility map[string]types.KBAccessDecision
 }
 
 // NewKBPermissions resolves reads for one caller and operation.
 func NewKBPermissions(ctx context.Context, shares KBShareLookup) *KBPermissions {
 	caller := types.CallerFromContext(ctx)
 	return &KBPermissions{
-		ctx:    ctx,
-		caller: caller,
-		shares: NewKBSharePermissions(ctx, shares, caller.TenantID, caller.Role),
+		ctx:        ctx,
+		caller:     caller,
+		shares:     NewKBSharePermissions(ctx, shares, caller.TenantID, caller.Role),
+		visibility: make(map[string]types.KBAccessDecision),
 	}
 }
 
@@ -83,12 +88,40 @@ func (p *KBPermissions) Check(kbID string, ownerTenantID uint64, required types.
 	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(p.ctx, kbID); err != nil {
 		return false, err
 	}
-	if (p.caller.TenantID == ownerTenantID && required == types.OrgRoleViewer) ||
-		HasKBGrant(p.ctx, kbID, ownerTenantID, required) {
+	if HasKBGrant(p.ctx, kbID, ownerTenantID, required) {
 		return true, nil
+	}
+	if p.caller.TenantID == ownerTenantID && required == types.OrgRoleViewer {
+		return p.visible(kbID)
 	}
 	if p.caller.TenantID == 0 || p.caller.TenantID == ownerTenantID {
 		return false, nil
 	}
 	return p.shares.Check(kbID, required)
+}
+
+// visible applies the per-user KB ACL to an own-tenant read.
+//
+// A request without an installed resolver keeps the pre-ACL behaviour: it has
+// already passed tenant membership, so the KB is readable. HTTP requests always
+// install the resolver, and it returns false for restricted KBs the caller is
+// not listed on.
+func (p *KBPermissions) visible(kbID string) (bool, error) {
+	if decision, ok := p.visibility[kbID]; ok {
+		return decision.CanView, nil
+	}
+	resolver, ok := KBUserVisibilityResolverFromContext(p.ctx)
+	if !ok {
+		return true, nil
+	}
+	decisions, err := resolver.DecideKBIDs(
+		p.ctx, []string{kbID}, p.caller.UserID, aclCaller(p.ctx, p.caller).Role,
+		types.IsSystemAdminFromContext(p.ctx),
+	)
+	if err != nil {
+		return false, err
+	}
+	decision := decisions[kbID]
+	p.visibility[kbID] = decision
+	return decision.CanView, nil
 }

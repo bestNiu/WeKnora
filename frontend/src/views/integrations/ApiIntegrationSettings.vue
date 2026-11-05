@@ -488,6 +488,13 @@
 
         <div class="api-key-dialog-row">
           <div class="api-key-dialog-row__label">
+            <label>{{ $t('knowledgeBase.access.title') }}</label>
+          </div>
+          <MemberOwnerSelect v-model="apiKeyForm.owner_user_id" />
+        </div>
+
+        <div class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
             <label>{{ $t('integrations.api.apiKeyAccessType') }}</label>
           </div>
           <t-radio-group v-model="apiKeyAccessMode" class="mode-radio api-key-access-type-radio">
@@ -591,6 +598,13 @@
 
         <div class="api-key-dialog-row">
           <div class="api-key-dialog-row__label">
+            <label>{{ $t('knowledgeBase.access.title') }}</label>
+          </div>
+          <MemberOwnerSelect v-model="editingAPIKeyForm.owner_user_id" />
+        </div>
+
+        <div class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
             <label>{{ $t('integrations.api.apiKeyAccessType') }}</label>
           </div>
           <t-radio-group v-model="editingAPIKeyAccessMode" class="mode-radio api-key-access-type-radio">
@@ -674,6 +688,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import MemberOwnerSelect from '@/components/MemberOwnerSelect.vue'
 import { copyWithToast } from '@/utils/clipboard'
 import { BUILTIN_SMART_REASONING_ID, type CustomAgent } from '@/api/agent'
 import { useAuthStore } from '@/stores/auth'
@@ -772,6 +787,7 @@ const editingCapabilitySelections = reactive<Record<TenantAPIKeyCapability, bool
 
 const editingAPIKeyForm = reactive({
   name: '',
+  owner_user_id: '',
   knowledge_base_ids: [] as string[],
   tenant_full_enabled: false,
   expires_at_unix: undefined as number | undefined,
@@ -808,6 +824,7 @@ function toggleEditingCapabilityGroup(group: ApiKeyCapabilityGroup, selected: bo
 
 const apiKeyForm = reactive({
   name: '',
+  owner_user_id: '',
   knowledge_base_ids: [] as string[],
   // Tenant-full keys already cover every capability. Scoped keys default to
   // retrieval + chat + agent reads so a fresh integration can ask questions
@@ -1464,6 +1481,7 @@ async function createScopedAPIKey() {
       knowledge_base_ids: apiKeyKnowledgeScopeApplies.value ? apiKeyForm.knowledge_base_ids : [],
       // Capabilities only matter below full access; full access already covers them all.
       capabilities: apiKeyFullAccessEnabled.value ? [] : selectedCapabilities(),
+      owner_user_id: apiKeyForm.owner_user_id || undefined,
     })
     if (!resp.success || !resp.data?.api_key) {
       throw new Error(resp.message || t('integrations.api.createApiKeyFailed'))
@@ -1483,6 +1501,7 @@ async function createScopedAPIKey() {
 function openEditAPIKeyScope(key: TenantAPIKey) {
   editingAPIKey.value = key
   editingAPIKeyForm.name = key.name
+  editingAPIKeyForm.owner_user_id = key.owner_user_id || ''
   editingAPIKeyForm.tenant_full_enabled = key.full_access
   editingAPIKeyForm.knowledge_base_ids = normalizeAPIKeyKnowledgeBaseIDs(key.knowledge_base_ids)
   const expiresAt = key.expires_at ? Date.parse(key.expires_at) : Number.NaN
@@ -1517,6 +1536,7 @@ async function saveAPIKeyConfiguration() {
       capabilities: editingAPIKeyFullAccessEnabled.value ? [] : editingSelectedCapabilities.value,
       knowledge_base_ids: editingKnowledgeScopeApplies.value ? editingAPIKeyForm.knowledge_base_ids : [],
       expires_at_unix: editingAPIKeyForm.expires_at_unix,
+      owner_user_id: editingAPIKeyForm.owner_user_id || undefined,
     })
     if (!resp.success || !resp.data) {
       throw new Error(resp.message || t('integrations.api.updateApiKeyScopeFailed'))

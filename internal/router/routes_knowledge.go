@@ -64,9 +64,23 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 // reuse OwnedKBOrAdmin because the URL :id is the KB id directly.
 // Body-scoped batch operations have a Contributor route gate and resolve
 // their KB ownership plus Editor operation grant inside the handler.
-func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler, g *rbacGuards) {
+func RegisterKnowledgeRoutes(
+	r *gin.RouterGroup,
+	handler *handler.KnowledgeHandler,
+	previewAdmin *handler.PreviewAdminHandler,
+	g *rbacGuards,
+) {
 	// 知识库下的知识路由组（URL :id is the KB id）。Scoped API key 需要
 	// ingest 能力才能写内容，且仍受 KB 范围限制；清空 KB 只允许 full-access key。
+	// Preview backfill: admin-only workspace maintenance. Registered on the
+	// knowledge group with a static first segment, matching the existing
+	// /knowledge/search route.
+	if previewAdmin != nil {
+		previewGroup := g.apiKeyGroup(r.Group("/knowledge"), apiKeyManageKnowledgeBases(apiKeyFullAccess()))
+		previewGroup.POST("/preview/backfill", g.Admin(), previewAdmin.Backfill)
+		previewGroup.GET("/preview/backfill/status", g.Admin(), previewAdmin.BackfillStatus)
+	}
+
 	kb := g.apiKeyGroup(r.Group("/knowledge-bases/:id/knowledge"), apiKeyIngest(apiKeyFullAccess()))
 	kbRead := kb.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
@@ -75,7 +89,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.POST("/manual", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
 		kbRead.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
 		// 原始文件下载沿用单文件下载的 Contributor + Editor 权限边界。
-		kbRead.POST("/batch-download", g.Contributor(), g.KBAccessWrite("id"), handler.BatchDownloadKnowledge)
+		kbRead.POST("/batch-download", g.Viewer(), g.KBAccessWrite("id"), handler.BatchDownloadKnowledge)
 		kbRead.GET("/folders", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledgeFolders)
 		kb.PUT("/folders", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RenameKnowledgeFolder)
 		// Clearing all contents under a KB is a destructive op; gate
@@ -129,14 +143,20 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/manual/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateManualKnowledge)
 		k.POST("/:id/reparse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReparseKnowledge)
 		k.POST("/:id/cancel-parse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.CancelKnowledgeParse)
+		// Graph-only rebuild: re-runs entity/relation extraction over the existing
+		// chunks so a prompt or vocabulary change costs no re-parse and no re-embed.
+		k.POST("/:id/graph/rebuild", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.RebuildKnowledgeGraph)
 		// Downloading exposes the original source file, so it has a stricter
 		// boundary than viewing parsed content or previewing it: tenant Viewers
 		// cannot download from their own workspace, and org-shared Viewer access
 		// cannot download from the source workspace. API keys still follow the
 		// retrieve capability declared by kRead; role guards intentionally defer
 		// machine-principal authorization to the API-key gate.
-		kRead.GET("/:id/download", g.Contributor(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DownloadKnowledgeFile)
+		kRead.GET("/:id/download", g.Viewer(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DownloadKnowledgeFile)
 		kRead.GET("/:id/preview", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.PreviewKnowledgeFile)
+		// Preview state: the frontend asks before fetching, so a pending
+		// render shows progress instead of a failed request.
+		kRead.GET("/:id/preview/meta", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.PreviewKnowledgeFileMeta)
 		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		kRead.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
@@ -201,7 +221,12 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 }
 
 // RegisterKnowledgeBaseRoutes 注册知识库相关的路由
-func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
+func RegisterKnowledgeBaseRoutes(
+	r *gin.RouterGroup,
+	handler *handler.KnowledgeBaseHandler,
+	accessHandler *handler.KBAccessAdminHandler,
+	g *rbacGuards,
+) {
 	// 知识库路由组。API-key 可达性按能力分两档，全部通过 apiKeyGroup 声明，
 	// 不要再用裸 kbgrp.Handle 注册（那会绕过网关、对所有 key 静默默认拒绝）：
 	//
@@ -225,6 +250,14 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
 		// 获取知识库详情 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id", g.Viewer(), g.KBAccessRead("id"), handler.GetKnowledgeBase)
+		// 按用户的知识库权限（可见/下载）。读写都需要「创建者或 Admin+」：
+		// 这是在改谁能看、谁能下载，属于资源管理动作而非普通编辑。
+		if accessHandler != nil {
+			kbManagement.GET("/:id/access", g.OwnedKBOrAdmin(), accessHandler.GetKBAccess)
+			kbManagement.PUT("/:id/access", g.OwnedKBOrAdmin(), accessHandler.PutKBAccess)
+			// 批量授权：跨多个知识库，故要求 Admin+（单库的创建者规则无法套用）。
+			kbManagement.POST("/access/batch", g.Admin(), accessHandler.PutKBBatchAccess)
+		}
 		// 更新/删除知识库 — 两层正交鉴权，缺一不可：
 		//   OwnedKBOrAdmin  管「租户内」归属：非创建者的 Contributor 改不了
 		//                   同事的 KB（跨租户 KB 在此走 lookup=NotFound → 交给

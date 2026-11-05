@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/filetransport"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -78,6 +79,32 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 	if len(ids) == 0 {
 		_ = c.Error(errors.NewBadRequestError("文档 ID 不能为空"))
 		return
+	}
+	// Per-user download permission. The batch is KB-scoped, so one decision
+	// covers every selected document; when it fails the error names the
+	// selected IDs so the UI can explain which files were denied.
+	if caller := types.CallerFromContext(c.Request.Context()); grant.KnowledgeBase != nil &&
+		grant.KnowledgeBase.TenantID == caller.TenantID {
+		if h.kbService == nil {
+			_ = c.Error(errors.NewForbiddenError("没有该知识库的下载权限").
+				WithDetails(map[string]any{"denied_ids": ids}))
+			return
+		}
+		kb, kbErr := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
+		if kbErr != nil {
+			_ = c.Error(errors.NewInternalServerError("无法校验下载权限，请稍后重试"))
+			return
+		}
+		allowed, dlErr := access.CanDownloadKB(ctx, kb)
+		if dlErr != nil {
+			_ = c.Error(errors.NewInternalServerError("无法校验下载权限，请稍后重试"))
+			return
+		}
+		if !allowed {
+			_ = c.Error(errors.NewForbiddenError("没有该知识库的下载权限").
+				WithDetails(map[string]any{"denied_ids": ids}))
+			return
+		}
 	}
 
 	items, err := h.kgService.GetKnowledgeBatch(ctx, tenantID, ids)

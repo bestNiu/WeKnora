@@ -42,6 +42,7 @@
       source-mode
       fill-height
       :toolbar-target="toolbarSlot"
+      :can-download="meta.canDownload"
       :locate="locate"
       @located="onLocated"
     />
@@ -110,7 +111,7 @@ const edited = ref(false)
 const imageDigest = ref<string>()
 const imageContext = ref<SourceLocateRequest['imageContext']>()
 let locateToken = 0
-const meta = reactive({ fileName: '', fileType: '', knowledgeSource: '', knowledgeType: '', title: '' })
+const meta = reactive({ fileName: '', fileType: '', knowledgeSource: '', knowledgeType: '', title: '', canDownload: false })
 let loadVersion = 0
 /** The knowledge whose file the preview currently shows. */
 let shownKnowledgeId = ''
@@ -179,6 +180,8 @@ async function loadMeta(version: number) {
     meta.knowledgeSource = meta.knowledgeSource || data.source || ''
     meta.knowledgeType = data.type || ''
     meta.title = meta.title || data.title || ''
+    // Server-computed: Owner/Admin/creator or an explicit per-KB grant.
+    meta.canDownload = Boolean(data.can_download)
   } catch {
     // Without details the file name from the reference decides below.
   }

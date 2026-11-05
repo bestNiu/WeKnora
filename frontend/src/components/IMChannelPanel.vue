@@ -241,6 +241,11 @@
             </t-select>
             <p class="form-desc">{{ $t('agentEditor.im.fileKnowledgeBaseHint') }}</p>
           </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('knowledgeBase.access.title') }}</label>
+            <MemberOwnerSelect v-model="formData.owner_user_id" :placeholder="$t('knowledgeBase.access.hint')" />
+            <p class="form-desc">{{ $t('knowledgeBase.access.hint') }}</p>
+          </div>
         </section>
       </div>
 
@@ -601,6 +606,7 @@ import { useChatResourcesStore } from '@/stores/chatResources';
 import type { IMChannel } from '@/api/agent';
 import { useAuthStore } from '@/stores/auth';
 import SettingDrawer from '@/components/settings/SettingDrawer.vue';
+import MemberOwnerSelect from '@/components/MemberOwnerSelect.vue';
 import IntegrationsAgentFilter from '@/components/IntegrationsAgentFilter.vue';
 import wecomLogo from '@/assets/img/im/wecom.svg';
 import feishuLogo from '@/assets/img/im/feishu.svg';
@@ -750,6 +756,7 @@ const formData = ref({
   locale: '' as IMLocale,
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
+  owner_user_id: '',
   credentials: defaultCredentials(),
 });
 
@@ -1006,6 +1013,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     locale: fullChannel.locale || '',
     session_mode: fullChannel.session_mode || 'user',
     knowledge_base_id: fullChannel.knowledge_base_id || '',
+    owner_user_id: fullChannel.owner_user_id || '',
     credentials: { ...fullChannel.credentials },
   };
   normalizeYunzhijiaCredentials();
@@ -1031,6 +1039,7 @@ function resetForm() {
     locale: '',
     session_mode: 'user',
     knowledge_base_id: '',
+    owner_user_id: '',
     credentials: defaultCredentials(),
   };
 }
@@ -1061,6 +1070,7 @@ async function handleSave() {
         locale: formData.value.locale,
         session_mode: formData.value.session_mode,
         knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
+        owner_user_id: formData.value.owner_user_id || undefined,
         credentials: formData.value.credentials,
         enabled: editingEnabled.value,
         ...(formData.value.target_agent_id ? { agent_id: formData.value.target_agent_id } : {}),
@@ -1080,6 +1090,7 @@ async function handleSave() {
         locale: formData.value.locale,
         session_mode: formData.value.session_mode,
         knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
+        owner_user_id: formData.value.owner_user_id || undefined,
         credentials: formData.value.credentials,
       });
       MessagePlugin.success(t('common.createSuccess'));

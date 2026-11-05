@@ -239,6 +239,7 @@ func RegisterEmbedPublicRoutes(
 	redisClient *redis.Client,
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	kbService interfaces.KnowledgeBaseService,
 	resourceCatalogs ...interfaces.ResourceCatalog,
 ) {
 	if embedHandler == nil || embedService == nil {
@@ -271,7 +272,7 @@ func RegisterEmbedPublicRoutes(
 		// Serve images embedded in bot replies (e.g. chart exports). EmbedAuth
 		// injects the channel's tenant, and the handler enforces that the
 		// requested path belongs to that tenant.
-		embed.GET("/files", newFileServeHandler(fileService, storageResolver, resourceCatalogs...))
+		embed.GET("/files", newFileServeHandler(fileService, storageResolver, kbService, resourceCatalogs...))
 	}
 }
 

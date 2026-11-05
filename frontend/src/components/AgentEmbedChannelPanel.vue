@@ -118,6 +118,11 @@
             <p v-else class="form-desc">{{ $t('embedPublish.nameDesc') }}</p>
           </div>
 
+          <div class="form-item">
+            <label class="form-label">{{ $t('knowledgeBase.access.title') }}</label>
+            <MemberOwnerSelect v-model="form.owner_user_id" :placeholder="$t('knowledgeBase.access.hint')" />
+          </div>
+
         </section>
       </div>
 
@@ -396,6 +401,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import MemberOwnerSelect from '@/components/MemberOwnerSelect.vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { copyWithToast } from '@/utils/clipboard'
 import { useAuthStore } from '@/stores/auth'
@@ -516,6 +522,7 @@ const defaultForm = () => ({
   default_locale: '' as EmbedLocaleTag,
   webhook_url: '',
   webhook_secret: '',
+  owner_user_id: '',
 })
 const form = ref(defaultForm())
 const webhookSecretPlaceholder = computed(() =>
@@ -832,6 +839,7 @@ const fillFormFromChannel = (ch: EmbedChannel) => {
     default_locale: (ch.default_locale || '') as EmbedLocaleTag,
     webhook_url: ch.webhook_url || '',
     webhook_secret: '',
+    owner_user_id: ch.owner_user_id || '',
   }
   originsText.value = (ch.allowed_origins || []).join('\n')
   originsError.value = ''
@@ -927,6 +935,7 @@ const saveForm = async () => {
       default_locale: form.value.default_locale || '',
       webhook_url: form.value.webhook_url || '',
       webhook_secret: form.value.webhook_secret || undefined,
+      owner_user_id: form.value.owner_user_id || undefined,
       enabled: editingId.value ? editingEnabled.value : true,
       agent_id: createAgentId.value,
     }

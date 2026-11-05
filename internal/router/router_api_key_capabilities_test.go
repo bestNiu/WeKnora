@@ -221,7 +221,7 @@ func TestKnowledgeBaseManagementRoutesDeclareManageKBsCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
+	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, nil, g)
 	RegisterInitializationRoutes(v1, &handler.InitializationHandler{}, g)
 
 	cases := []struct {
@@ -256,7 +256,7 @@ func TestKnowledgeBaseLifecycleRoutesDeclareManageCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
+	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, nil, g)
 
 	// The whole KB lifecycle (create/copy/duplicate/update/delete) shares one
 	// policy tier: manage_kbs OR full-access. create/copy/duplicate produce a
@@ -293,8 +293,8 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
-	RegisterKnowledgeRoutes(v1, &handler.KnowledgeHandler{}, g)
+	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, nil, g)
+	RegisterKnowledgeRoutes(v1, &handler.KnowledgeHandler{}, nil, g)
 	RegisterFAQRoutes(v1, &handler.FAQHandler{}, g)
 	RegisterKnowledgeTagRoutes(v1, &handler.TagHandler{}, g)
 	RegisterChatRoutes(v1, &sessionhandler.Handler{}, g)
@@ -602,7 +602,7 @@ func TestKnowledgeBatchWriteRoutesDeclareIngestCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterKnowledgeRoutes(v1, &handler.KnowledgeHandler{}, g)
+	RegisterKnowledgeRoutes(v1, &handler.KnowledgeHandler{}, nil, g)
 
 	cases := []struct {
 		method string
@@ -631,7 +631,7 @@ func TestKBCloneProgressRouteRequiresRetrieveOrManageKbsCapability(t *testing.T)
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
+	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, nil, g)
 
 	policy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/knowledge-bases/copy/progress/:task_id")
 	if !policy.RequireFullAccess {

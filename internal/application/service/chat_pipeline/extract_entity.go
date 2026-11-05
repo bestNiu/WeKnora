@@ -247,7 +247,11 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 		logger.Errorf(ctx, "failed to parse graph: %v", err)
 		return nil, err
 	}
-	// e.RemoveUnknownRelation(ctx, graph)
+	// Drop relations whose type is not in the configured vocabulary. Tags holds
+	// the allowed relation types (the prompt injects them into the
+	// "allowed relationship types" slot), so this keeps the graph from
+	// fragmenting into near-synonym edges.
+	e.RemoveUnknownRelation(ctx, graph)
 	return graph, nil
 }
 
@@ -426,20 +430,110 @@ func (f *Formater) formatExtraction(nodes []*types.GraphNode, relations []*types
 	return formatted, nil
 }
 
+
+// trailingCommaRE matches a comma directly before a closing bracket, the most
+// common defect when the model writes a long array of entities.
+var trailingCommaRE = regexp.MustCompile(`,\s*([}\]])`)
+
+// repairJSONPayload makes a malformed extraction payload parseable without
+// dropping any content. Two defects dominate in practice: a trailing comma
+// before a closer, and a closer that belongs to an outer container (the model
+// "forgets" to close an inner array, e.g. {"attrs":["a","b"}). Both are fixed by
+// inserting the missing closers and removing the stray comma; nothing is ever
+// removed, so a repair cannot invent or lose an entity.
+func repairJSONPayload(content string) (string, bool) {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "", false
+	}
+	changed := false
+	for {
+		next := trailingCommaRE.ReplaceAllString(trimmed, "$1")
+		if next == trimmed {
+			break
+		}
+		trimmed, changed = next, true
+	}
+
+	var out strings.Builder
+	stack := make([]byte, 0, 8)
+	inString, escaped := false, false
+	for i := 0; i < len(trimmed); i++ {
+		c := trimmed[i]
+		if inString {
+			out.WriteByte(c)
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[', '{':
+			stack = append(stack, c)
+		case ']', '}':
+			want := byte('[')
+			if c == '}' {
+				want = '{'
+			}
+			for len(stack) > 0 && stack[len(stack)-1] != want {
+				out.WriteByte(closerFor(stack[len(stack)-1]))
+				stack = stack[:len(stack)-1]
+			}
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+		out.WriteByte(c)
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		out.WriteByte(closerFor(stack[i]))
+	}
+	repaired := out.String()
+	return repaired, changed || repaired != trimmed
+}
+
+func closerFor(open byte) byte {
+	if open == '{' {
+		return '}'
+	}
+	return ']'
+}
+
 func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]interface{}, error) {
 	if text == "" {
-		return nil, errors.New("empty or invalid input string")
+		// An empty completion is transient (gateway hiccup, tokens spent on
+		// reasoning): keep it retriable instead of classifying it as a prose
+		// refusal, which callers skip without retrying.
+		return nil, errors.New("empty completion")
 	}
 	content := f.extractContent(ctx, text)
 	// logger.Debugf(ctx, "Extracted content: %s", content)
 	if content == "" {
-		return nil, errors.New("empty or invalid input string")
+		return nil, errors.New("empty completion")
 	}
 
 	var parsed interface{}
 	var err error
 	if f.formatType == FormatTypeJSON {
 		err = json.Unmarshal([]byte(content), &parsed)
+	}
+	if err != nil && f.formatType == FormatTypeJSON {
+		// Table-heavy chunks make the model drop the closing bracket or leave a
+		// trailing comma. Repairing those two shapes recovers the extraction
+		// instead of dropping the chunk after three identical retries.
+		if repaired, ok := repairJSONPayload(content); ok {
+			if retryErr := json.Unmarshal([]byte(repaired), &parsed); retryErr == nil {
+				logger.Debugf(ctx, "recovered malformed JSON payload (%d -> %d bytes)", len(content), len(repaired))
+				content, err = repaired, nil
+			}
+		}
 	}
 	if err != nil {
 		// Distinguish "the model answered in prose" (e.g. it declined to

@@ -77,6 +77,10 @@ type embedChannelRequest struct {
 	WebhookURL             *string  `json:"webhook_url"`
 	WebhookSecret          *string  `json:"webhook_secret"`
 	AgentID                *string  `json:"agent_id"`
+	// OwnerUserID binds the embedded bot to a user for per-user KB access.
+	// Omitted on create defaults to the caller; omitted on update leaves it
+	// unchanged.
+	OwnerUserID *string `json:"owner_user_id"`
 }
 
 // isProductionMode reports whether the server runs in a hardened (release) mode.
@@ -145,8 +149,15 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	if req.AllowFileUpload != nil {
 		allowFileUpload = *req.AllowFileUpload
 	}
+	// A bot acts as its creator unless an admin picks someone else, so per-user
+	// KB visibility and download apply to embed traffic out of the box.
+	ownerUserID := types.CallerFromContext(c.Request.Context()).UserID
+	if req.OwnerUserID != nil && strings.TrimSpace(*req.OwnerUserID) != "" {
+		ownerUserID = strings.TrimSpace(*req.OwnerUserID)
+	}
 	ch, token, err := h.embedSvc.Create(c.Request.Context(), tenantID, agentID, &types.EmbedChannel{
 		Name:                   req.Name,
+		OwnerUserID:            ownerUserID,
 		Enabled:                enabled,
 		AllowedOrigins:         originsJSON,
 		WelcomeMessage:         req.WelcomeMessage,
@@ -227,6 +238,7 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	originsJSON, _ := json.Marshal(req.AllowedOrigins)
 	update := &types.EmbedChannel{
 		Name:               req.Name,
+		OwnerUserID:        stringOrEmpty(req.OwnerUserID),
 		AllowedOrigins:     originsJSON,
 		WelcomeMessage:     req.WelcomeMessage,
 		RateLimitPerMinute: req.RateLimitPerMinute,
@@ -809,6 +821,7 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 		"tenant_id":                ch.TenantID,
 		"agent_id":                 ch.AgentID,
 		"name":                     ch.Name,
+		"owner_user_id":            ch.OwnerUserID,
 		"enabled":                  ch.Enabled,
 		"allowed_origins":          ch.AllowedOriginsList(),
 		"welcome_message":          ch.WelcomeMessage,

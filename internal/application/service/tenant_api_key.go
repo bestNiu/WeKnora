@@ -72,6 +72,7 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
 		Capabilities:     capabilities,
 		ExpiresAt:        expiresAt,
+		OwnerUserID:      strings.TrimSpace(req.OwnerUserID),
 	}
 	if key.FullAccess {
 		key.KnowledgeBaseIDs = nil
@@ -160,6 +161,7 @@ func (s *tenantAPIKeyService) UpdateAPIKey(
 		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
 		Capabilities:     capabilities,
 		ExpiresAt:        expiresAt,
+		OwnerUserID:      strings.TrimSpace(req.OwnerUserID),
 	}
 	if key.FullAccess {
 		key.KnowledgeBaseIDs = nil

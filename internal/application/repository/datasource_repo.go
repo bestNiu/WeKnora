@@ -139,11 +139,13 @@ func (r *DataSourceRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// FindActive retrieves all active data sources (used for scheduling)
+// FindActive retrieves the schedulable data sources: active ones plus those whose
+// last run failed. "error" is a result, not a kill switch — excluding it here
+// made a single transient failure stop the cron permanently.
 func (r *DataSourceRepository) FindActive(ctx context.Context) ([]*types.DataSource, error) {
 	var dataSources []*types.DataSource
 	if err := r.db.WithContext(ctx).
-		Where("status = ?", types.DataSourceStatusActive).
+		Where("status IN ?", []string{types.DataSourceStatusActive, types.DataSourceStatusError}).
 		Where("deleted_at IS NULL").
 		Where("sync_schedule != ''").
 		Order("created_at DESC").

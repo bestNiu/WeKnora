@@ -452,6 +452,12 @@ func withIMIdentity(ctx context.Context, channel *IMChannel, msg *IncomingMessag
 		ctx = types.WithPrincipalAuthSource(ctx, types.AuthSourceIM)
 	}
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+	// A channel bot acts as its bound owner for per-user KB access. Unbound
+	// channels keep an empty caller user and therefore only reach tenant-wide
+	// knowledge bases.
+	ctx = types.WithCaller(ctx, types.Caller{
+		TenantID: tenantID, UserID: channel.OwnerUserID, Role: types.TenantRoleViewer,
+	})
 	// IM bots have no live client that can complete an in-conversation MCP OAuth
 	// prompt, so mark the context non-interactive: the agent emits a one-shot
 	// authorization notice (surfaced in the reply) instead of blocking until the
@@ -3203,6 +3209,7 @@ type ChannelWithAgent struct {
 	Mode        string    `json:"mode"`
 	OutputMode  string    `json:"output_mode"`
 	Locale      string    `json:"locale"`
+	OwnerUserID string    `json:"owner_user_id,omitempty"`
 	SessionMode string    `json:"session_mode"`
 	BotIdentity string    `json:"bot_identity"`
 	CreatedAt   time.Time `json:"created_at"`

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
@@ -21,7 +22,9 @@ func TestApplyAuthSessionSetsBothSurfaces(t *testing.T) {
 	user := &types.User{ID: "u1", IsSystemAdmin: true}
 	tenant := &types.Tenant{ID: 7}
 	principal := types.Principal{Type: types.PrincipalWebUser, ID: "u1"}
-	scope := &types.TenantAPIKeyScope{KeyID: 3}
+	// Bound to u1 so the caller subject matches the authenticated user this
+	// fixture asserts on both surfaces.
+	scope := &types.TenantAPIKeyScope{KeyID: 3, OwnerUserID: "u1"}
 	applyAuthSession(c, authSession{
 		User:        user,
 		Principal:   principal,
@@ -124,5 +127,62 @@ func TestBearerToken(t *testing.T) {
 		if got != tc.want || ok != tc.ok {
 			t.Fatalf("bearerToken(%q) = (%q, %v), want (%q, %v)", tc.header, got, ok, tc.want, tc.ok)
 		}
+	}
+}
+
+// A machine principal carries its bound owner as the effective caller user, so
+// per-user KB access (visibility/download) applies to API keys and channel bots
+// exactly as it does to a signed-in member. Unbound principals keep their
+// synthetic identity and therefore only reach tenant-wide knowledge bases.
+func TestApplyAuthSessionUsesBoundOwnerForMachinePrincipals(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user := &types.User{ID: "system-7"}
+
+	c1, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c1.Request = httptest.NewRequest(http.MethodGet, "/api/v1/knowledge-bases", nil)
+	applyAuthSession(c1, authSession{
+		User: user, TenantID: 7, Role: types.TenantRoleViewer,
+		APIKeyScope: &types.TenantAPIKeyScope{KeyID: 3, OwnerUserID: "u-owner"},
+	})
+	if got := types.CallerFromContext(c1.Request.Context()).UserID; got != "u-owner" {
+		t.Fatalf("bound owner not used as caller user: %q", got)
+	}
+
+	c2, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c2.Request = httptest.NewRequest(http.MethodGet, "/api/v1/knowledge-bases", nil)
+	applyAuthSession(c2, authSession{
+		User: user, TenantID: 7, Role: types.TenantRoleViewer,
+		APIKeyScope: &types.TenantAPIKeyScope{KeyID: 4},
+	})
+	if got := types.CallerFromContext(c2.Request.Context()).UserID; got != "" {
+		t.Fatalf("unbound machine principal must have no ACL subject, got %q", got)
+	}
+}
+
+// The API-key session must carry the machine scope into the request context so
+// the per-user ACL can recognise a machine principal and ignore its synthetic
+// Owner role. Without that, a full-access key would bypass a restricted KB.
+func TestAPIKeySessionCarriesScopeIntoACL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/knowledge-bases/kb", nil)
+	applyAuthSession(c, authSession{
+		User:     &types.User{ID: "system-7"},
+		TenantID: 7,
+		Role:     types.TenantRoleOwner,
+		APIKeyScope: &types.TenantAPIKeyScope{
+			KeyID: 1, FullAccess: true, ScopeType: types.APIKeyScopeTenant,
+		},
+	})
+	if _, ok := types.TenantAPIKeyScopeFromContext(c.Request.Context()); !ok {
+		t.Fatal("API key scope missing from the request context")
+	}
+	restricted := &types.KnowledgeBase{ID: "kb", TenantID: 7, VisibilityMode: "restricted"}
+	decision, err := access.DecideKBVisibility(c.Request.Context(), restricted, types.CallerFromContext(c.Request.Context()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.CanView || decision.CanDownload {
+		t.Fatalf("unbound full-access key bypassed the restricted KB: %+v", decision)
 	}
 }

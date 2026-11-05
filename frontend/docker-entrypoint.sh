@@ -16,8 +16,15 @@ if [ "$SKILL_MB" -gt 512 ] 2>/dev/null; then
   SKILL_MB=512
 fi
 
+# 品牌名会直接写进 <script> 内的 JS 字符串，先剔掉换行和会破坏字符串/标签的字符。
+# 这两个值由运维通过环境变量提供，不是用户输入，只做防误伤处理。
+APP_NAME_SAFE=$(printf '%s' "${APP_NAME:-企业知识库}" | tr -d '\r\n' | sed 's/[\\"<>]/_/g')
+APP_TAGLINE_SAFE=$(printf '%s' "${APP_TAGLINE:-内部资料智能问答}" | tr -d '\r\n' | sed 's/[\\"<>]/_/g')
+
 cat > /usr/share/nginx/html/config.js << EOF
 window.__RUNTIME_CONFIG__ = {
+  APP_NAME: "${APP_NAME_SAFE}",
+  APP_TAGLINE: "${APP_TAGLINE_SAFE}",
   MAX_FILE_SIZE_MB: ${FILE_MB},
   MAX_SKILL_BUNDLE_SIZE_MB: ${SKILL_MB},
   DEFAULT_LOCALE: "${RUNTIME_DEFAULT_LOCALE}"

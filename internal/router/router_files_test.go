@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -194,7 +195,7 @@ func TestServeFilesResolvesShortResourceReference(t *testing.T) {
 	serveFilesWithResources(engine, &stubFileService{getFile: func(_ context.Context, path string) (io.ReadCloser, error) {
 		requestedPath = path
 		return io.NopCloser(strings.NewReader("image")), nil
-	}}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: physical}})
+	}}, nil, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: physical}})
 
 	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(ref), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
@@ -216,7 +217,7 @@ func TestServeFilesRejectsCrossTenantResourceReference(t *testing.T) {
 	serveFilesWithResources(engine, &stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
 		t.Fatal("GetFile should not be called")
 		return nil, nil
-	}}, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 7, PhysicalPath: "local://7/exports/a.png"}})
+	}}, nil, nil, &stubResourceCatalog{resource: &types.StoredResource{TenantID: 7, PhysicalPath: "local://7/exports/a.png"}})
 
 	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(ref), nil)
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42}))
@@ -1391,4 +1392,106 @@ func (s *stubResourceCatalog) GetMessageFileBindings(
 	string,
 ) (*types.MessageFileBindings, error) {
 	return s.fileBindings, nil
+}
+
+// The tenant raw-storage proxy must not hand out a document's original file to
+// a caller without the per-KB download permission. Extracted images (no
+// source_file binding) stay readable; this covers the source-file case.
+type sourceFileCatalog struct {
+	stubResourceCatalog
+	kbIDs []string
+}
+
+func (c *sourceFileCatalog) SourceFileKnowledgeBases(context.Context, uint64, string) ([]string, error) {
+	return c.kbIDs, nil
+}
+
+type sourceFileKBStub struct {
+	interfaces.KnowledgeBaseService
+	kb *types.KnowledgeBase
+}
+
+func (s *sourceFileKBStub) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
+	return s.kb, nil
+}
+
+type sourceFileVisibilityResolver struct {
+	canDownload bool
+}
+
+func (r *sourceFileVisibilityResolver) DecideKBIDs(
+	_ context.Context, kbIDs []string, _ string, _ types.TenantRole, _ bool,
+) (map[string]types.KBAccessDecision, error) {
+	out := make(map[string]types.KBAccessDecision, len(kbIDs))
+	for _, id := range kbIDs {
+		out[id] = types.KBAccessDecision{CanView: true, CanDownload: r.canDownload}
+	}
+	return out, nil
+}
+
+func TestServeFilesRequiresDownloadPermissionForSourceFile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	for _, tc := range []struct {
+		name        string
+		canDownload bool
+		want        int
+	}{
+		{name: "viewer without grant", canDownload: false, want: http.StatusForbidden},
+		{name: "granted download", canDownload: true, want: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := gin.New()
+			catalog := &sourceFileCatalog{
+				stubResourceCatalog: stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: "local://42/knowledge/a.pptx"}},
+				kbIDs:               []string{"kb-1"},
+			}
+			serveFilesWithResources(
+				engine,
+				&stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+					return io.NopCloser(strings.NewReader("pptx")), nil
+				}},
+				nil,
+				&sourceFileKBStub{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 42, VisibilityMode: "restricted"}},
+				catalog,
+			)
+			req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(ref), nil)
+			ctx := context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
+			ctx = types.WithCaller(ctx, types.Caller{TenantID: 42, UserID: "u1", Role: types.TenantRoleViewer})
+			ctx = access.WithKBUserVisibilityResolver(ctx, &sourceFileVisibilityResolver{canDownload: tc.canDownload})
+			req = req.WithContext(ctx)
+			recorder := httptest.NewRecorder()
+			engine.ServeHTTP(recorder, req)
+			if recorder.Code != tc.want {
+				t.Fatalf("status = %d, want %d (body=%s)", recorder.Code, tc.want, recorder.Body.String())
+			}
+		})
+	}
+}
+
+// Legacy provider:// paths are not catalog handles, so there is no source-file
+// binding to check; the tenant-path validation stays the authority. This locks
+// the production wiring (kbService present) rather than the nil-KB test path.
+func TestServeFilesPhysicalPathKeepsLegacyContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	catalog := &stubResourceCatalog{resource: &types.StoredResource{TenantID: 42, PhysicalPath: "local://42/x/a.pptx"}}
+	serveFilesWithResources(
+		engine,
+		&stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("pptx")), nil
+		}},
+		nil,
+		&sourceFileKBStub{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 42, VisibilityMode: "restricted"}},
+		catalog,
+	)
+	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape("local://42/x/a.pptx"), nil)
+	ctx := context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
+	ctx = types.WithCaller(ctx, types.Caller{TenantID: 42, UserID: "u1", Role: types.TenantRoleViewer})
+	req = req.WithContext(ctx)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", recorder.Code, recorder.Body.String())
+	}
 }

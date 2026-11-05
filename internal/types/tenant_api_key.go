@@ -24,6 +24,10 @@ type TenantAPIKey struct {
 	APIKey           string          `json:"api_key" gorm:"column:api_key;type:text;not null;default:''"`
 	FullAccess       bool            `json:"full_access" gorm:"not null;default:false"`
 	KnowledgeBaseIDs StringArray     `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`
+	// OwnerUserID binds this machine principal to a user so workspace
+	// per-user KB access (visibility and download) can be evaluated. Empty
+	// means unbound: restricted KBs stay invisible and nothing downloads.
+	OwnerUserID string `json:"owner_user_id,omitempty" gorm:"type:varchar(36);index"`
 	// Capabilities are bounded grants for non-full-access keys. Each
 	// capability maps to an integration persona (retrieval, chat, ingest,
 	// tenant infrastructure management, and history access). KB scoping
@@ -273,6 +277,10 @@ type TenantAPIKeyScope struct {
 	FullAccess       bool
 	KnowledgeBaseIDs StringArray
 	Capabilities     StringArray
+	// OwnerUserID binds this machine principal to a user so the per-user KB
+	// access decisions (visibility and download) have a subject. Empty means
+	// unbound: restricted knowledge bases stay invisible and nothing downloads.
+	OwnerUserID string
 }
 
 func WithTenantAPIKeyScope(ctx context.Context, scope TenantAPIKeyScope) context.Context {
@@ -298,6 +306,7 @@ func (s TenantAPIKeyScope) Normalize() TenantAPIKeyScope {
 		FullAccess:       s.FullAccess,
 		KnowledgeBaseIDs: normalizeIDArray(s.KnowledgeBaseIDs),
 		Capabilities:     NormalizeAPIKeyCapabilities(s.Capabilities),
+		OwnerUserID:      strings.TrimSpace(s.OwnerUserID),
 	}
 }
 

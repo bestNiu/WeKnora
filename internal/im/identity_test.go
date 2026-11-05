@@ -77,3 +77,17 @@ func TestWithIMIdentityAppliesChannelLocaleAcrossTransports(t *testing.T) {
 		})
 	}
 }
+
+// A channel bot acts as its bound owner for per-user KB access. An unbound
+// channel keeps an empty ACL subject (tenant-wide KBs only), never the
+// system-<tenant> synthetic identity.
+func TestWithIMIdentityBindsChannelOwner(t *testing.T) {
+	bound := withIMIdentity(context.Background(), &IMChannel{ID: "c1", TenantID: 7, OwnerUserID: "u-owner"}, nil)
+	if got := types.CallerFromContext(bound); got.UserID != "u-owner" || got.TenantID != 7 {
+		t.Fatalf("bound channel caller = %+v, want tenant 7 user u-owner", got)
+	}
+	unbound := withIMIdentity(context.Background(), &IMChannel{ID: "c2", TenantID: 7}, nil)
+	if got := types.CallerFromContext(unbound); got.UserID != "" {
+		t.Fatalf("unbound channel caller user = %q, want empty", got.UserID)
+	}
+}

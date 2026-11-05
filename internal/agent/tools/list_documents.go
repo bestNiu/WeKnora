@@ -20,7 +20,8 @@ var listDocumentsTool = BaseTool{
 	name: ToolListDocuments,
 	description: "List the documents inside one knowledge base, newest first, with pagination and an optional " +
 		"title filter.\nUse it to see what a knowledge base contains or to find a document by name; each entry " +
-		"carries the doc://N handle that read_document accepts.",
+		"carries the doc://N handle that read_document accepts. When you list documents for the user, link " +
+		"each one as [title](doc://N) with that exact handle so the reader can open it.",
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {

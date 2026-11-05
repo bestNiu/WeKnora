@@ -143,6 +143,7 @@ type tenantAPIKeyCreateRequest struct {
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
 	Capabilities     []string `json:"capabilities"`
 	ExpiresAt        *int64   `json:"expires_at_unix"`
+	OwnerUserID      string   `json:"owner_user_id"`
 }
 
 // tenantAPIKeyUpdateRequest 修改已创建 API Key 的配置，字段语义与创建接口一致。
@@ -152,6 +153,7 @@ type tenantAPIKeyUpdateRequest struct {
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
 	Capabilities     []string `json:"capabilities"`
 	ExpiresAt        *int64   `json:"expires_at_unix"`
+	OwnerUserID      string   `json:"owner_user_id"`
 }
 
 type tenantAPIKeyResponse struct {
@@ -162,6 +164,7 @@ type tenantAPIKeyResponse struct {
 	FullAccess       bool                  `json:"full_access"`
 	KnowledgeBaseIDs types.StringArray     `json:"knowledge_base_ids"`
 	Capabilities     types.StringArray     `json:"capabilities"`
+	OwnerUserID      string                `json:"owner_user_id,omitempty"`
 	LastUsedAt       *time.Time            `json:"last_used_at,omitempty"`
 	ExpiresAt        *time.Time            `json:"expires_at,omitempty"`
 	CreatedAt        time.Time             `json:"created_at"`
@@ -683,6 +686,10 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	if appErr := h.validateAPIKeyOwner(ctx, id, req.OwnerUserID); appErr != nil {
+		c.Error(appErr)
+		return
+	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
@@ -699,6 +706,7 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 		KnowledgeBaseIDs: req.KnowledgeBaseIDs,
 		Capabilities:     req.Capabilities,
 		ExpiresAt:        expiresAt,
+		OwnerUserID:      req.OwnerUserID,
 	})
 	if err != nil {
 		c.Error(errors.NewInternalServerError("Failed to create API key").WithDetails(err.Error()))
@@ -736,6 +744,10 @@ func (h *TenantHandler) UpdateAPIKey(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
+	if appErr := h.validateAPIKeyOwner(ctx, tenantID, req.OwnerUserID); appErr != nil {
+		c.Error(appErr)
+		return
+	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
@@ -745,6 +757,7 @@ func (h *TenantHandler) UpdateAPIKey(c *gin.Context) {
 	updated, err := h.apiKeyService.UpdateAPIKey(ctx, interfaces.TenantAPIKeyUpdateRequest{
 		TenantID: tenantID, APIKeyID: keyID, Name: req.Name, FullAccess: req.FullAccess,
 		KnowledgeBaseIDs: req.KnowledgeBaseIDs, Capabilities: req.Capabilities, ExpiresAt: expiresAt,
+		OwnerUserID: req.OwnerUserID,
 	})
 	if err != nil {
 		c.Error(errors.NewNotFoundError("API key not found"))
@@ -784,10 +797,26 @@ func tenantAPIKeyForResponse(key *types.TenantAPIKey) tenantAPIKeyResponse {
 		FullAccess:       key.FullAccess,
 		KnowledgeBaseIDs: key.KnowledgeBaseIDs,
 		Capabilities:     types.NormalizeAPIKeyCapabilities(key.Capabilities),
+		OwnerUserID:      key.OwnerUserID,
 		LastUsedAt:       key.LastUsedAt,
 		ExpiresAt:        key.ExpiresAt,
 		CreatedAt:        key.CreatedAt,
 	}
+}
+
+// validateAPIKeyOwner rejects an owner that is not an active member of the
+// workspace: the key would otherwise inherit grants for a user who cannot even
+// reach the workspace.
+func (h *TenantHandler) validateAPIKeyOwner(ctx context.Context, tenantID uint64, ownerUserID string) *errors.AppError {
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	if ownerUserID == "" || h.memberService == nil {
+		return nil
+	}
+	member, err := h.memberService.GetMembership(ctx, ownerUserID, tenantID)
+	if err != nil || member == nil || member.Status != types.TenantMemberStatusActive {
+		return errors.NewValidationError("owner_user_id must be an active workspace member")
+	}
+	return nil
 }
 
 func validateTenantAPIKeyRequest(

@@ -43,6 +43,9 @@ const (
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
 	ConnectorTypeSeafile     = "seafile"
+	// ConnectorTypeEDoc syncs folders and their current file versions from an
+	// eDoc (易道 / edoc2 ECM) deployment through its integration-key SDK API.
+	ConnectorTypeEDoc = "edoc"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"

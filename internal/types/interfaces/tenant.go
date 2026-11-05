@@ -74,6 +74,9 @@ type TenantAPIKeyCreateRequest struct {
 	KnowledgeBaseIDs []string
 	Capabilities     []string
 	ExpiresAt        *time.Time
+	// OwnerUserID binds the key to a user for per-user KB access. Empty keeps
+	// the legacy machine identity (restricted KBs invisible).
+	OwnerUserID string
 }
 
 type TenantAPIKeyCreateResult struct {
@@ -91,6 +94,7 @@ type TenantAPIKeyUpdateRequest struct {
 	KnowledgeBaseIDs []string
 	Capabilities     []string
 	ExpiresAt        *time.Time
+	OwnerUserID      string
 }
 
 type TenantAPIKeyRepository interface {

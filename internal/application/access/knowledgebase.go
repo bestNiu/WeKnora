@@ -115,6 +115,16 @@ func ResolveKB(ctx context.Context, request KBRequest, kb *types.KnowledgeBase, 
 		}, nil
 	}
 	if kb.TenantID == request.Caller.TenantID {
+		// Per-user visibility applies to the KB's own workspace. A hidden KB
+		// answers NotFound, matching the "does not exist" response the rest of
+		// the KB routes use so the caller cannot probe for it.
+		decision, err := DecideKBVisibility(ctx, kb, request.Caller)
+		if err != nil {
+			return nil, err
+		}
+		if !decision.CanView {
+			return nil, ErrNotFound
+		}
 		return grant(types.OrgRoleAdmin)
 	}
 	if shares != nil {

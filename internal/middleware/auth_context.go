@@ -32,6 +32,9 @@ type authSession struct {
 	// APIKeyScope marks machine principals; the APIKeyGate authorizes them
 	// per-route from this scope.
 	APIKeyScope *types.TenantAPIKeyScope
+	// OwnerUserID binds a machine principal (API key, embed channel, IM bot)
+	// to a user. It overrides the synthetic identity for per-user KB access.
+	OwnerUserID string
 	// Extra carries surface-specific context values (e.g. the authenticated
 	// embed channel) that must be visible on both surfaces like the rest.
 	Extra map[types.ContextKey]any
@@ -83,9 +86,21 @@ func applyAuthSession(c *gin.Context, s authSession) {
 		set(key, v)
 	}
 
-	userID := ""
-	if s.User != nil {
-		userID = s.User.ID
+	// A machine principal carries its bound owner as the effective user, so
+	// per-user KB access applies to API keys and channel bots exactly as it
+	// does to a signed-in member.
+	userID := s.OwnerUserID
+	if userID == "" && s.APIKeyScope != nil {
+		userID = s.APIKeyScope.OwnerUserID
+	}
+	if userID == "" {
+		// A machine principal without a bound owner has NO per-user ACL
+		// subject. The synthetic user resolved for auditing (often the
+		// workspace owner) must not become the caller: that would let an
+		// unbound full-access key inherit the owner's creator/Admin rights.
+		if s.APIKeyScope == nil && s.User != nil {
+			userID = s.User.ID
+		}
 	}
 	ctx = types.WithCaller(ctx, types.Caller{TenantID: s.TenantID, UserID: userID, Role: s.Role})
 	c.Request = c.Request.WithContext(ctx)

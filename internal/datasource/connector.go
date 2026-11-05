@@ -318,6 +318,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "token",
 		Capabilities: []string{"incremental", "hierarchical", "deletion_sync"},
 	},
+	types.ConnectorTypeEDoc: {
+		Type:         types.ConnectorTypeEDoc,
+		Name:         "eDoc (易道)",
+		Description:  "Sync folders and their current file versions from an eDoc content library",
+		Priority:     14,
+		AuthType:     "custom",
+		Capabilities: []string{"incremental", "hierarchical", "deletion_sync"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata

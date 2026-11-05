@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     generated_profile TEXT,
     id         VARCHAR(64) PRIMARY KEY,
     tenant_id  INTEGER NOT NULL,
+    visibility_mode VARCHAR(16) NOT NULL DEFAULT 'tenant',
     deleted_at DATETIME
 );
 `
@@ -389,6 +390,7 @@ func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
     generated_profile TEXT,
 		id VARCHAR(64) PRIMARY KEY,
 		tenant_id INTEGER NOT NULL,
+		visibility_mode VARCHAR(16) NOT NULL DEFAULT 'tenant',
 		deleted_at DATETIME
 	)`).Error)
 	require.NoError(t, db.Exec(

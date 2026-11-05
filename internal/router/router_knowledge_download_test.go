@@ -74,7 +74,7 @@ func newKnowledgeDownloadRouteTestEngine(
 		c.Set(types.TenantIDContextKey.String(), uint64(1))
 		c.Next()
 	})
-	RegisterKnowledgeRoutes(r.Group("/api/v1"), &handler.KnowledgeHandler{}, guards)
+	RegisterKnowledgeRoutes(r.Group("/api/v1"), &handler.KnowledgeHandler{}, nil, guards)
 	return r
 }
 

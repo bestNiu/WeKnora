@@ -12,29 +12,31 @@ import grpc
 from grpc_health.v1 import health_pb2_grpc
 from grpc_health.v1.health import HealthServicer
 
-from docreader.auth import AuthInterceptor, TLSConfigError, load_tls_credentials
-from docreader import config
-from docreader.config import CONFIG
-from docreader.parser import Parser
-from docreader.preprocess import PreprocessLimits, PreprocessRunner
-from docreader.proto import docreader_pb2_grpc
-from docreader.parser.registry import registry
-from docreader.proto.docreader_pb2 import (
+from .auth import AuthInterceptor, TLSConfigError, load_tls_credentials
+from . import config
+from .config import CONFIG
+from .parser import Parser
+from .preprocess import PreprocessLimits, PreprocessRunner
+from .proto import docreader_pb2_grpc
+from .parser.registry import registry
+from .parser.pdf_render import render_to_pdf
+from .proto.docreader_pb2 import (
     ReadRequest,
     ReadResponse,
+    RenderResponse,
     ImageRef,
     ReadStreamMeta,
     ReadStreamResponse,
     ListEnginesResponse,
     ParserEngineInfo,
 )
-from docreader.source_wire import source_blocks_to_proto
-from docreader.utils.request import init_logging_request_id, request_id_context
+from .source_wire import source_blocks_to_proto
+from .utils.request import init_logging_request_id, request_id_context
 
 _SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 
 
-def to_valid_utf8_text(s: Optional[str]) -> str:
+def to_valid_utf8_text(s: str | None) -> str:
     if not s:
         return ""
     s = _SURROGATE_RE.sub("\ufffd", s)
@@ -149,6 +151,17 @@ def _iter_image_refs(images: dict):
         )
 
 
+class _PreprocessImageHandler:
+    """Callable gRPC handler carrying its own per-method executor."""
+
+    def __init__(self, runner, executor):
+        self._runner = runner
+        self.experimental_thread_pool = executor
+
+    def __call__(self, request, context):
+        return self._runner.run(request.image, context)
+
+
 class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
     def __init__(self, preprocess_runner=None):
         super().__init__()
@@ -162,11 +175,12 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
             thread_name_prefix="image-preprocess",
         )
 
-        def preprocess_image(request, context):
-            return self._preprocess_runner.run(request.image, context)
-
-        preprocess_image.experimental_thread_pool = self._preprocess_executor
-        self.PreprocessImage = preprocess_image
+        # gRPC reads the per-method executor off the handler object, so the
+        # handler is a callable with an explicit attribute instead of a plain
+        # function carrying ad-hoc state.
+        self.PreprocessImage = _PreprocessImageHandler(
+            self._preprocess_runner, self._preprocess_executor
+        )
 
     def close(self):
         self._preprocess_runner.close()
@@ -295,6 +309,25 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 sent,
             )
 
+    def Render(self, request, context):
+        """Convert an Office document to PDF for the app preview.
+
+        A failure is reported inside RenderResponse.error rather than as a gRPC
+        error: conversion problems (unsupported filter, LibreOffice crash) are
+        normal outcomes the caller falls back from, not transport failures.
+        """
+        request_id = request.request_id or str(uuid.uuid4())
+        with request_id_context(request_id):
+            try:
+                pdf, page_count = render_to_pdf(
+                    request.file_content, request.file_name, request.file_type
+                )
+                return RenderResponse(pdf=pdf, page_count=page_count)
+            except Exception as exc:  # noqa: BLE001 - reported to the caller
+                logger.error("Render failed: %s", exc)
+                logger.info("Traceback: %s", traceback.format_exc())
+                return RenderResponse(error=str(exc))
+
     def ListEngines(self, request, context):
         overrides = dict(getattr(request, "config_overrides", None) or {})
         engines_data = registry.list_engines(overrides=overrides or None)
@@ -314,7 +347,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
 def main():
     config.print_config()
 
-    interceptors = [AuthInterceptor()]
+    interceptors: list[grpc.ServerInterceptor] = [AuthInterceptor()]
 
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=CONFIG.grpc_max_workers),

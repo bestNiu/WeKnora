@@ -211,7 +211,10 @@ export default {
         read_only: '只檢視，不做任何修改。',
         confirm: '每次修改前暫停並通知你審批；可在詳情裡把常用操作設為長期授權。',
         auto_write: '可復原的修改直接執行；刪除等操作仍暫停等待審批。',
-      },
+ 
+      backfill: '產生全部預覽',
+      backfillQueued: '已加入佇列：{count} 個文件',
+      backfillStats: '已就緒 {ready} · 產生中 {pending} · 失敗 {failed}',     },
     },
     schedule: {
       kinds: {
@@ -7932,6 +7935,20 @@ export default {
     }
   },
   knowledgeBase: {
+    access: {
+      title: '成員與權限',
+      hint: '控制誰能看到這個知識庫、誰能下載原始檔案；下載權限獨立於可見性。',
+      visibility: '可見範圍',
+      modeTenant: '全空間可見',
+      modeRestricted: '指定成員',
+      restrictedHint: '切換為「指定成員」後，未列入的成員將無法檢索或開啟此知識庫。',
+      canView: '可見',
+      canDownload: '可下載',
+      empty: '暫無成員',
+      saved: '已儲存',
+      loadFailed: '載入權限失敗',
+      saveFailed: '儲存失敗'
+    },
     tagAddAction: '新增標籤',
     documentCount: '{count} 個文件',
     filters: '篩選',

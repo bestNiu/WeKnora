@@ -51,8 +51,8 @@
       <div v-if="menuVisible" class="user-dropdown" @click.stop>
         <!-- 弹出菜单：账号（头像+昵称）／当前空间（名称+权限）；底部侧栏样式不改。 -->
         <div v-if="userName" class="dropdown-user-header is-clickable" role="button" tabindex="0"
-          @click="handleQuickNav('userprofile')" @keydown.enter.prevent="handleQuickNav('userprofile')"
-          @keydown.space.prevent="handleQuickNav('userprofile')">
+          @click="authStore.isPortalMode ? openChangePassword() : handleQuickNav('userprofile')" @keydown.enter.prevent="authStore.isPortalMode ? openChangePassword() : handleQuickNav('userprofile')"
+          @keydown.space.prevent="authStore.isPortalMode ? openChangePassword() : handleQuickNav('userprofile')">
           <div class="dropdown-user-avatar">
             <img v-if="userAvatar" :src="userAvatar" :alt="$t('common.avatar')" />
             <span v-else class="dropdown-user-avatar-placeholder">{{ userInitial }}</span>
@@ -71,7 +71,7 @@
           </div>
         </div>
 
-        <div v-if="userName && !authStore.isLiteMode" ref="tenantMenuItemRef" class="dropdown-tenant-panel" :class="{
+        <div v-if="userName && !authStore.isLiteMode && !authStore.isPortalMode" ref="tenantMenuItemRef" class="dropdown-tenant-panel" :class="{
           'is-open': tenantSubmenuOpen,
           'is-clickable': showTenantSwitcher,
         }" @mouseenter="showTenantSwitcher && showTenantSubmenu()"
@@ -90,28 +90,33 @@
           <t-icon v-if="showTenantSwitcher" name="swap" class="dropdown-tenant-panel-trail"
             :title="$t('tenant.switcher.menuLabel')" />
         </div>
-        <div class="menu-divider"></div>
+        <div v-if="!authStore.isPortalMode" class="menu-divider"></div>
         <!-- 账号与空间是头像菜单的核心上下文；基础设施类配置统一收进「全部设置」。 -->
-        <div class="menu-item" @click="handleQuickNav('general')">
+        <div v-if="!authStore.isPortalMode" class="menu-item" @click="handleQuickNav('general')">
           <t-icon name="user" class="menu-icon" />
           <span>{{ $t('general.personalSettings') }}</span>
         </div>
-        <div v-if="!authStore.isLiteMode" class="menu-item" @click="handleQuickNav('tenant')">
+        <!-- 门户模式：设置页不可达，密码修改在这里就地完成。 -->
+        <div v-else class="menu-item" @click="openChangePassword">
+          <t-icon name="lock-on" class="menu-icon" />
+          <span>{{ $t('userProfile.changePassword.label') }}</span>
+        </div>
+        <div v-if="!authStore.isLiteMode && !authStore.isPortalMode" class="menu-item" @click="handleQuickNav('tenant')">
           <t-icon name="user-circle" class="menu-icon" />
           <span>{{ $t('settings.workspaceSettings') }}</span>
         </div>
         <!-- “管理”类快捷入口只对真正具备写权限的人展示。只读名册和模型列表
              仍可从「全部设置」进入，避免 viewer 看到名不副实的管理入口。 -->
-        <div v-if="canManageMembers" class="menu-item" @click="handleQuickNav('members')">
+        <div v-if="canManageMembers && !authStore.isPortalMode" class="menu-item" @click="handleQuickNav('members')">
           <t-icon name="usergroup" class="menu-icon" />
           <span>{{ $t('tenantMember.title') }}</span>
         </div>
-        <div v-if="canManageModels" class="menu-item" @click="handleQuickNav('models')">
+        <div v-if="canManageModels && !authStore.isPortalMode" class="menu-item" @click="handleQuickNav('models')">
           <t-icon name="control-platform" class="menu-icon" />
           <span>{{ $t('settings.modelManagement') }}</span>
         </div>
-        <div class="menu-divider"></div>
-        <div class="menu-item" @click="handleSettings">
+        <div v-if="!authStore.isPortalMode" class="menu-divider"></div>
+        <div v-if="!authStore.isPortalMode" class="menu-item" @click="handleSettings">
           <t-icon name="setting" class="menu-icon" />
           <span>{{ $t('general.allSettings') }}</span>
         </div>
@@ -125,8 +130,8 @@
           <t-icon name="server" class="menu-icon" />
           <span>{{ $t('settings.navGroups.systemAdministration') }}</span>
         </div>
-        <div class="menu-divider"></div>
-        <div class="menu-item" @click="openDocs">
+        <div v-if="!authStore.isPortalMode" class="menu-divider"></div>
+        <div v-if="!authStore.isPortalMode" class="menu-item" @click="openDocs">
           <t-icon name="help-circle" class="menu-icon" />
           <span class="menu-text-with-icon">
             <span>{{ $t('general.helpAndDocs') }}</span>
@@ -136,7 +141,7 @@
             </svg>
           </span>
         </div>
-        <div class="menu-item" :title="$t('common.githubStarTip')" @click="openGithub">
+        <div v-if="!authStore.isPortalMode" class="menu-item" :title="$t('common.githubStarTip')" @click="openGithub">
           <t-icon name="logo-github" class="menu-icon" />
           <span class="menu-text-with-icon">
             <span>{{ $t('common.github') }}</span>
@@ -211,6 +216,37 @@
 
     <!-- 创建工作区弹窗 -->
     <CreateTenantDialog v-model:visible="createTenantDialogVisible" @created="onTenantCreated" />
+
+    <!-- 门户模式：设置页不可达，密码修改就地完成 -->
+    <t-dialog
+      v-model:visible="passwordDialogVisible"
+      :header="t('userProfile.changePassword.label')"
+      :confirm-btn="{ content: t('userProfile.changePassword.submit'), loading: passwordSubmitting }"
+      :cancel-btn="{ content: t('common.cancel') }"
+      width="420px"
+      @confirm="submitPasswordChange"
+    >
+      <div class="portal-password-form">
+        <t-input
+          v-model="passwordForm.oldPassword"
+          type="password"
+          :label="t('userProfile.changePassword.currentLabel')"
+          :placeholder="t('userProfile.changePassword.currentPlaceholder')"
+        />
+        <t-input
+          v-model="passwordForm.newPassword"
+          type="password"
+          :label="t('userProfile.changePassword.newLabel')"
+          :placeholder="t('userProfile.changePassword.newPlaceholder')"
+        />
+        <t-input
+          v-model="passwordForm.confirmPassword"
+          type="password"
+          :label="t('userProfile.changePassword.confirmLabel')"
+          :placeholder="t('userProfile.changePassword.confirmPlaceholder')"
+        />
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -220,7 +256,7 @@ import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { logout as logoutApi } from '@/api/auth'
+import { logout as logoutApi, changePassword } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
 import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
@@ -521,6 +557,51 @@ const openDocs = () => {
 const openGithub = () => {
   menuVisible.value = false
   window.open('https://github.com/Tencent/WeKnora', '_blank')
+}
+
+// 门户模式下的密码修改（设置页不可达时使用）
+const passwordDialogVisible = ref(false)
+const passwordSubmitting = ref(false)
+const passwordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
+
+const openChangePassword = () => {
+  menuVisible.value = false
+  passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+  passwordDialogVisible.value = true
+}
+
+const submitPasswordChange = async () => {
+  const form = passwordForm.value
+  if (!form.oldPassword) {
+    MessagePlugin.warning(t('userProfile.changePassword.currentRequired'))
+    return
+  }
+  if (!form.newPassword) {
+    MessagePlugin.warning(t('userProfile.changePassword.policyFailed'))
+    return
+  }
+  if (form.newPassword !== form.confirmPassword) {
+    MessagePlugin.warning(t('userProfile.changePassword.confirmLabel'))
+    return
+  }
+  passwordSubmitting.value = true
+  try {
+    const result = await changePassword({
+      old_password: form.oldPassword,
+      new_password: form.newPassword,
+    })
+    if (!result.success) {
+      MessagePlugin.error(result.message || t('userProfile.changePassword.failed'))
+      return
+    }
+    passwordDialogVisible.value = false
+    MessagePlugin.success(t('userProfile.changePassword.success'))
+    // 后端换密码后已吊销全部会话，本地状态必须清掉。
+    authStore.logout()
+    router.push('/login')
+  } finally {
+    passwordSubmitting.value = false
+  }
 }
 
 // 注销

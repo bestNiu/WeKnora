@@ -69,6 +69,11 @@ export const useMenuStore = defineStore('menuStore', () => {
 
   const liteHiddenPaths = new Set(['logout', 'organizations'])
 
+  // 门户模式（viewer / contributor）：侧栏只留「新对话」，把知识库、智能体、
+  // 自动化、工具箱、共享空间、设置等入口全部隐藏。历史会话列表仍由
+  // creatChat 的 children 渲染，不受影响。
+  const portalVisiblePaths = new Set(['creatChat'])
+
   // 共享空间 (organizations) 仅对当前空间的 admin / owner 暴露入口。
   // viewer / contributor 即便在共享空间里拥有资源，也无需自行管理共享关系，
   // 入口在侧栏只会徒增噪音；后端 RBAC 才是权限的最终来源（见 middleware/rbac.go）。
@@ -76,6 +81,9 @@ export const useMenuStore = defineStore('menuStore', () => {
     const authStore = useAuthStore()
     const deploymentCapabilities = useDeploymentCapabilitiesStore()
     return menuArr.filter(item => {
+      if (authStore.isPortalMode && !portalVisiblePaths.has(item.path)) {
+        return false
+      }
       if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) {
         return false
       }

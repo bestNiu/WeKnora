@@ -211,7 +211,10 @@ export default {
         read_only: '閲覧のみで、何も変更しません。',
         confirm: '変更のたびに一時停止して承認を求めます。よく使う操作は詳細で継続承認にできます。',
         auto_write: '元に戻せる変更はそのまま実行し、削除などは引き続き承認を待ちます。',
-      },
+ 
+      backfill: 'すべてのプレビューを生成',
+      backfillQueued: '{count} 件をキューに追加しました',
+      backfillStats: '準備完了 {ready} · 生成中 {pending} · 失敗 {failed}',     },
     },
     schedule: {
       kinds: {
@@ -880,6 +883,20 @@ export default {
     sharedTooltip: '共有スペース経由で外部ワークスペースからアクセス'
   },
   knowledgeBase: {
+    access: {
+      title: 'メンバーと権限',
+      hint: 'このナレッジベースを閲覧できる人と、元ファイルをダウンロードできる人を管理します。ダウンロード権限は公開範囲とは独立です。',
+      visibility: '公開範囲',
+      modeTenant: 'ワークスペース全体',
+      modeRestricted: '指定メンバー',
+      restrictedHint: '指定メンバーに切り替えると、一覧にないメンバーはこのナレッジベースを検索・閲覧できなくなります。',
+      canView: '閲覧可',
+      canDownload: 'ダウンロード可',
+      empty: 'メンバーなし',
+      saved: '保存しました',
+      loadFailed: '権限の読み込みに失敗しました',
+      saveFailed: '保存に失敗しました'
+    },
     tagAddAction: 'タグを追加',
     documentCount: '{count} 件のドキュメント',
     filters: '絞り込み',

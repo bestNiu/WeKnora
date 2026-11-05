@@ -187,3 +187,21 @@ test('formatReferenceSnippet strips markdown noise from preview text', async () 
 test('getDomainFromUrl strips www prefix', () => {
   assert.equal(getDomainFromUrl('https://www.example.com/x'), 'example.com')
 })
+
+test('list_documents rows stay one card per document with no chunk to locate', () => {
+  const rows = Array.from({ length: 20 }, (_, index) => ({
+    id: `doc-${index}`,
+    knowledge_id: `doc-${index}`,
+    knowledge_title: `【竞标PPT】样本 ${index}.pptx`,
+    knowledge_base_id: 'kb-1',
+    chunk_type: 'document',
+    content: `description ${index}`,
+  }))
+
+  const sections = buildReferenceSections(rows)
+  assert.equal(sections.length, 1)
+  assert.equal(sections[0].id, 'documents')
+  assert.equal(sections[0].items.length, 20)
+  assert.equal(sections[0].items[0].chunkId, undefined)
+  assert.equal(sections[0].items[0].knowledgeId, 'doc-0')
+})

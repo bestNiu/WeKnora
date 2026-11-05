@@ -21,6 +21,30 @@ service DocReader {
   // caller's fallback (use the original bytes) is a normal outcome rather than
   // a failure to report.
   rpc PreprocessImage(PreprocessImageRequest) returns (PreprocessImageResponse) {}
+  // Render converts an Office document to PDF for the in-app preview.
+  // The PDF is a derived artifact: the original file stays behind the
+  // knowledge-base download permission, so the preview surface never needs to
+  // ship the source bytes.
+  rpc Render(RenderRequest) returns (RenderResponse) {}
+}
+
+// RenderRequest carries one document to convert.
+message RenderRequest {
+  bytes  file_content = 1;
+  string file_name = 2;
+  string file_type = 3;
+  string request_id = 4;
+}
+
+message RenderResponse {
+  // pdf is the converted document. Empty when error is set.
+  bytes pdf = 1;
+  // page_count is the number of pages in pdf (one per slide for presentations,
+  // including hidden slides, so slide N maps to page N).
+  int32 page_count = 2;
+  // error describes why conversion failed; the caller falls back to the
+  // original bytes or an on-demand retry.
+  string error = 3;
 }
 
 // PreprocessImageRequest carries one photographed page.

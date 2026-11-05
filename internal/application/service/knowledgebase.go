@@ -410,6 +410,16 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 		}
 	}
 
+	// Per-user visibility: a restricted KB the caller is not listed on must
+	// not appear in the list, the agent editor's KB picker, or KBSelectionMode
+	// "all". Only this listing is filtered; ListKnowledgeBasesByTenantID also
+	// serves shared agents and organization views, whose workspace is not the
+	// caller's and therefore keeps the share-grant semantics.
+	kbs, err = filterOwnTenantKBsByVisibility(ctx, kbs)
+	if err != nil {
+		return nil, err
+	}
+
 	// Per-user pin stamping + ordering. The "main" list view is the
 	// only path that needs to honour the caller's personal pin set;
 	// agent/share/IM callers go through ListKnowledgeBasesByTenantID
@@ -418,6 +428,44 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 		s.applyUserKBPins(ctx, tenantID, userID, kbs)
 	}
 	return kbs, nil
+}
+
+// filterOwnTenantKBsByVisibility drops KBs the caller may not read.
+//
+// Organization-shared KBs are left untouched: they belong to another workspace
+// and are governed by the share grant, not by the caller's own per-user ACL.
+func filterOwnTenantKBsByVisibility(
+	ctx context.Context, kbs []*types.KnowledgeBase,
+) ([]*types.KnowledgeBase, error) {
+	caller := types.CallerFromContext(ctx)
+	own := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb != nil && kb.TenantID == caller.TenantID {
+			own = append(own, kb)
+		}
+	}
+	if len(own) == 0 {
+		return kbs, nil
+	}
+	decisions, err := access.DecideKBVisibilityMany(ctx, own, caller)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": caller.TenantID,
+			"kb_count":  len(own),
+		})
+		return nil, err
+	}
+	filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb == nil {
+			continue
+		}
+		if kb.TenantID == caller.TenantID && !decisions[kb.ID].CanView {
+			continue
+		}
+		filtered = append(filtered, kb)
+	}
+	return filtered, nil
 }
 
 // ListKnowledgeBasesByTenantID returns all knowledge bases for the given tenant (e.g. for shared agent context).
@@ -567,6 +615,28 @@ func clearLegacyVLMFields(cfg *types.VLMConfig) {
 //
 // Any future cross-store rebind workflow must use raw SQL through a
 // dedicated repository method — the only sanctioned write path post-creation.
+// SetVisibilityMode changes who may read the knowledge base.
+func (s *knowledgeBaseService) SetVisibilityMode(
+	ctx context.Context, id string, mode types.KBVisibilityMode,
+) error {
+	if id == "" {
+		return errors.New("knowledge base ID cannot be empty")
+	}
+	if !mode.IsValid() {
+		return fmt.Errorf("invalid visibility mode %q", mode)
+	}
+	// Narrow capability instead of widening KnowledgeBaseRepository: only the
+	// concrete repository implements this column write, and test fakes that
+	// embed the interface stay valid.
+	repo, ok := s.repo.(interface {
+		UpdateKnowledgeBaseVisibilityMode(context.Context, string, string) error
+	})
+	if !ok {
+		return errors.New("knowledge base repository cannot update visibility")
+	}
+	return repo.UpdateKnowledgeBaseVisibilityMode(ctx, id, string(mode))
+}
+
 func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	id string,
 	name string,

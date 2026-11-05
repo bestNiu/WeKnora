@@ -22,7 +22,7 @@ func TestMigrateLegacyStorageBackends(t *testing.T) {
 	require.NoError(t, db.Exec(`CREATE TABLE knowledge_bases (
     profile_config TEXT,
     generated_profile TEXT,
-		id TEXT PRIMARY KEY, tenant_id INTEGER, storage_provider_config TEXT,
+		id TEXT PRIMARY KEY, tenant_id INTEGER, visibility_mode TEXT NOT NULL DEFAULT 'tenant', storage_provider_config TEXT,
 		storage_backend_id TEXT, cos_config TEXT, updated_at DATETIME, deleted_at DATETIME
 	)`).Error)
 	require.NoError(t, db.AutoMigrate(&types.StorageBackend{}))

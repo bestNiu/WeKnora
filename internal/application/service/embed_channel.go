@@ -73,6 +73,7 @@ func (s *embedChannelService) Create(
 		TenantID:               tenantID,
 		AgentID:                agentID,
 		Name:                   strings.TrimSpace(req.Name),
+		OwnerUserID:            strings.TrimSpace(req.OwnerUserID),
 		Enabled:                req.Enabled,
 		PublishToken:           token,
 		AllowedOrigins:         originsJSON,
@@ -127,6 +128,9 @@ func (s *embedChannelService) Update(
 	}
 	if req.Name != "" {
 		ch.Name = strings.TrimSpace(req.Name)
+	}
+	if owner := strings.TrimSpace(req.OwnerUserID); owner != "" {
+		ch.OwnerUserID = owner
 	}
 	ch.WelcomeMessage = req.WelcomeMessage
 	ch.PrimaryColor = strings.TrimSpace(req.PrimaryColor)

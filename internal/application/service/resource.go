@@ -31,6 +31,30 @@ func NewResourceCatalog(repo interfaces.ResourceRepository) interfaces.ResourceC
 	return &resourceCatalog{repo: repo}
 }
 
+// SourceFileKnowledgeBases resolves reference and returns the knowledge bases
+// whose original source file it is. Extracted images and generated assets
+// return an empty list, so the raw-storage proxy can keep serving them.
+func (c *resourceCatalog) SourceFileKnowledgeBases(
+	ctx context.Context, tenantID uint64, reference string,
+) ([]string, error) {
+	if c == nil || c.repo == nil || reference == "" {
+		return nil, nil
+	}
+	res, err := c.Resolve(ctx, reference)
+	if err != nil || res == nil || res.TenantID != tenantID {
+		// Not a catalog handle (a legacy provider:// physical path): there is
+		// no binding to check, so keep the pre-existing tenant-path behaviour.
+		return nil, nil
+	}
+	lookup, ok := c.repo.(interface {
+		SourceFileKnowledgeBases(context.Context, uint64, string) ([]string, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	return lookup.SourceFileKnowledgeBases(ctx, tenantID, res.ID)
+}
+
 func randomResourceToken() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {

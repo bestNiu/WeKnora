@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import KBInfoPopover from '@/components/KBInfoPopover.vue';
+import KBAccessPanel from './components/KBAccessPanel.vue';
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
 import { useUIStore } from '@/stores/ui';
 import { useOrganizationStore } from '@/stores/organization';
@@ -96,7 +97,7 @@ const kbLoading = ref(false);
 const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
 const isWiki = computed(() => !!kbInfo.value?.indexing_strategy?.wiki_enabled);
-const validTabs = ['documents', 'wiki', 'graph', 'gallery'] as const
+const validTabs = ['documents', 'wiki', 'graph', 'gallery', 'access'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
@@ -129,6 +130,11 @@ const kbViewTabs = computed(() => {
     )
   }
   tabs.push({ key: 'gallery', icon: 'image', label: t(`${w}.tabGallery`), tip: t(`${w}.tabGalleryTip`) })
+  // Access policy is an administrative surface: only a KB creator or Admin+
+  // can change who sees or downloads the KB.
+  if (canManage.value) {
+    tabs.push({ key: 'access', icon: 'lock-on', label: t('knowledgeBase.access.title'), tip: t('knowledgeBase.access.hint') })
+  }
   return tabs
 })
 const shownKbTab = computed<KbTab>(() =>
@@ -366,14 +372,14 @@ const canMutateKnowledge = computed(() => {
   return authStore.hasRole('contributor');
 });
 
-// Downloading returns the original source file, which is intentionally more
-// restrictive than viewing parsed content or using the preview tab. A tenant
-// Viewer can never download; for cross-tenant KBs the effective share
-// permission must additionally be Editor or Admin.
+// Downloading returns the original source file. The server decides it now:
+// Owner/Admin/KB creator or an explicit per-user grant, never the tenant role
+// alone. `my_permission` is only populated for an organization-shared KB, where
+// the share grant stays the authority.
 const canDownloadKnowledge = computed(() => {
-  if (!authStore.hasRole('contributor')) return false;
+  if (kbInfo.value?.can_download === true) return true;
   const permission = effectiveKBPermission.value;
-  return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
+  return permission === 'owner' || permission === 'admin' || permission === 'editor';
 });
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
@@ -2473,11 +2479,12 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
       </div>
 
       <!-- Image Gallery (4th tab) -->
+      <KBAccessPanel v-if="activeKbTab === 'access' && kbId" :kb-id="kbId" />
       <ImageGallery v-if="activeKbTab === 'gallery' && kbId" :knowledge-base-id="kbId" @open-source-doc="openSourceDoc" />
 
       <!-- wiki/graph tabs only exist on wiki KBs; a stale tab (?tab= or one
            carried over from a previous KB) falls back to documents. -->
-      <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery')">
+      <template v-if="activeKbTab !== 'access' && (activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery'))">
         <div class="knowledge-main">
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"

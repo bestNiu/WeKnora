@@ -14,6 +14,7 @@ import (
 	"go.uber.org/dig"
 
 	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -31,19 +32,24 @@ import (
 type RouterParams struct {
 	dig.In
 
-	Config                       *config.Config
-	FileService                  interfaces.FileService
-	UserService                  interfaces.UserService
-	KBService                    interfaces.KnowledgeBaseService
-	KnowledgeService             interfaces.KnowledgeService
-	ChunkService                 interfaces.ChunkService
-	SessionService               interfaces.SessionService
-	MessageService               interfaces.MessageService
-	ModelService                 interfaces.ModelService
-	EvaluationService            interfaces.EvaluationService
-	KBShareService               interfaces.KBShareService
-	AgentShareService            interfaces.AgentShareService
+	Config            *config.Config
+	FileService       interfaces.FileService
+	UserService       interfaces.UserService
+	KBService         interfaces.KnowledgeBaseService
+	KnowledgeService  interfaces.KnowledgeService
+	ChunkService      interfaces.ChunkService
+	SessionService    interfaces.SessionService
+	MessageService    interfaces.MessageService
+	ModelService      interfaces.ModelService
+	EvaluationService interfaces.EvaluationService
+	KBShareService    interfaces.KBShareService
+	AgentShareService interfaces.AgentShareService
+	// KBVisibilityResolver applies the per-user KB ACL to every /api/v1
+	// request. Nil disables per-user filtering (legacy behaviour).
+	KBVisibilityResolver         access.KBUserVisibilityResolver
 	KBHandler                    *handler.KnowledgeBaseHandler
+	KBAccessHandler              *handler.KBAccessAdminHandler
+	PreviewAdminHandler          *handler.PreviewAdminHandler
 	GraphSearchHandler           *handler.GraphSearchHandler
 	KnowledgeHandler             *handler.KnowledgeHandler
 	TenantHandler                *handler.TenantHandler
@@ -118,14 +124,20 @@ func NewRouter(params RouterParams) *gin.Engine {
 	}
 
 	// CORS 中间件应放在最前面。
-	// 注意：通配符 AllowOrigins 下浏览器会拒绝一切带凭据（cookie）的跨域
-	// 请求（CORS 规范禁止 "*" 与 credentials 组合），因此 AllowCredentials
-	// 实际只对未来改为回显具体 Origin 时才生效；当前认证全部走显式的
-	// Authorization / X-API-Key 头，不依赖 ambient 凭据。若引入 cookie
-	// 认证，必须先把 AllowOrigins 换成受控清单。
+	// 认证全部走显式的 Authorization / X-API-Key 头，不依赖 ambient
+	// 凭据，所以这里保持 AllowCredentials=false：通配符 AllowOrigins 与
+	// 带凭据请求组合会被 CORS 规范拒绝，也等于把任意站点挡在 cookie
+	// 之外。OIDC 回调的 nonce cookie 走顶层导航，不经过 CORS。
+	// 若将来引入 cookie 认证，必须先把 AllowOrigins 换成受控清单，
+	// 再打开 AllowCredentials。
 	r.Use(cors.New(cors.Config{
-		AllowOrigins: []string{"*"},
-		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		// Cross-origin API access stays open (the SPA, embed widget and
+		// third-party integrations call the API directly), but with
+		// AllowCredentials=false no browser attaches cookies or ambient
+		// credentials, so reflecting any origin cannot act on a logged-in
+		// session. Replace this func with an allowlist when cookie auth lands.
+		AllowOriginFunc: func(string) bool { return true },
+		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders: []string{
 			"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID", "X-Tenant-ID",
 			"X-Embed-Session", "X-External-User-ID", "X-External-User-Token", "X-WeKnora-Desktop-Token",
@@ -134,7 +146,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 			"MCP-Protocol-Version", "Mcp-Method", "Mcp-Name", "Mcp-Session-Id", "Last-Event-ID",
 		},
 		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin", "Mcp-Session-Id"},
-		AllowCredentials: true,
+		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	}))
 
@@ -187,6 +199,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		params.RedisClient,
 		params.FileService,
 		params.StorageBackendResolver,
+		params.KBService,
 		params.ResourceCatalog,
 	)
 
@@ -212,7 +225,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
-	serveFilesWithResources(r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog)
+	serveFilesWithResources(r, params.FileService, params.StorageBackendResolver, params.KBService, params.ResourceCatalog)
 
 	// Presigned file access: no auth required, signature-verified.
 	servePresignedFiles(r, params.TenantService, params.StorageBackendResolver)
@@ -259,11 +272,15 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// apiKeyGroup helpers. Must be attached BEFORE the Register* calls
 		// so that sub-groups inherit it.
 		v1.Use(rbacGuards.apiKeyAuthorizer.Middleware())
+		// Per-user KB visibility: installed once for every authenticated
+		// request so access.ResolveKB / KBPermissions can enforce the
+		// caller's grants without threading a service through each handler.
+		v1.Use(middleware.AttachKBUserVisibilityResolver(params.KBVisibilityResolver))
 
 		RegisterAuthRoutes(v1, params.AuthHandler, rbacGuards)
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
-		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, params.KBAccessHandler, rbacGuards)
 		RegisterImageAttrRoutes(v1, params.KBHandler, rbacGuards)
 		RegisterKnowledgeBaseActivityRoutes(v1, params.AuditLogHandler, rbacGuards)
 		// KB-scoped image proxy: lets tenants render images embedded in
@@ -297,7 +314,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.KnowledgeService,
 		)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
-		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
+		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, params.PreviewAdminHandler, rbacGuards)
 		RegisterGraphSearchRoutes(v1, params.GraphSearchHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)

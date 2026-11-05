@@ -18,6 +18,9 @@ services:
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       - MAX_SKILL_BUNDLE_SIZE_MB=${MAX_SKILL_BUNDLE_SIZE_MB:-256}
       - DEFAULT_LOCALE=${DEFAULT_LOCALE:-}
+      # 品牌显示名：写入前端 config.js，改完重启前端容器即可生效，无需重建镜像。
+      - APP_NAME=${APP_NAME:-企业知识库}
+      - APP_TAGLINE=${APP_TAGLINE:-内部资料智能问答}
       - APP_HOST=${APP_HOST:-app}
       # APP_BACKEND_PORT: the port NGINX proxies to (default 8080).
       # For local deployment this is the App container's listening port, independent of host-mapped APP_PORT.

@@ -2,11 +2,12 @@
     <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed, 'aside_box--resizing': uiStore.sidebarResizing }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
-                <img class="logo" src="@/assets/img/weknora.png" alt="">
+            <div class="logo_box" @click="router.push(authStore.isPortalMode ? '/platform/creatChat' : '/platform/knowledge-bases')" style="cursor: pointer;">
+                <span class="logo-wordmark" :title="APP_NAME">{{ APP_NAME }}</span>
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
-            <div class="logo_actions">
+            <!-- 门户模式不暴露全局搜索（能搜到知识库/智能体）与文档助手 -->
+            <div class="logo_actions" v-if="!authStore.isPortalMode">
                 <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="bottom">
                     <div class="header-icon-btn" :class="{ 'is-active': assistantStore.visible }"
                         :aria-label="assistantName" @click="assistantStore.toggle()">
@@ -67,7 +68,7 @@
         <div class="menu_top" ref="scrollContainer" @scroll="handleScroll">
             <!-- 全局搜索入口：点击打开命令面板（⌘K）。展开态移至顶部 logo_row 的图标按钮；
                  折叠态在此处保留为图标项 + 深色 tooltip。 -->
-            <div class="menu_box menu_box--cmdk" v-if="uiStore.sidebarCollapsed">
+            <div class="menu_box menu_box--cmdk" v-if="uiStore.sidebarCollapsed && !authStore.isPortalMode">
                 <t-tooltip placement="right">
                     <template #content>
                         <span class="cmdk-tip">
@@ -296,6 +297,7 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { useEditorResourcesStore } from '@/stores/editorResources';
+import { APP_NAME } from '@/config/brand';
 
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
@@ -1395,6 +1397,20 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         .logo {
             width: 108px;
             height: auto;
+        }
+
+        // 纯文字 wordmark：不依赖任何上游图片资源，显示名由 APP_NAME 运行时配置。
+        .logo-wordmark {
+            display: block;
+            max-width: 100%;
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.2;
+            letter-spacing: 0.2px;
+            color: var(--td-text-color-primary, #1f2329);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .lite-badge {

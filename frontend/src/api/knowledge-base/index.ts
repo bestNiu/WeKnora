@@ -26,7 +26,7 @@ export async function listKnowledgeBaseActivity(
   if (params.outcome) query.set('outcome', params.outcome);
   if (params.actor) query.set('actor', params.actor);
   const qs = query.toString();
-  return (await get(`/api/v1/knowledge-bases/${id}/activity${qs ? `?${qs}` : ''}`)) as unknown as ListAuditLogResponse;
+  return get<ListAuditLogResponse>(`/api/v1/knowledge-bases/${id}/activity${qs ? `?${qs}` : ''}`);
 }
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
@@ -659,8 +659,49 @@ export function batchDownloadKnowledge(kbId: string, ids: string[], signal?: Abo
   });
 }
 
-export function previewKnowledgeFile(id: string) {
-  return getDown(`/api/v1/knowledge/${id}/preview`);
+export function previewKnowledgeFile(id: string, fallbackOriginal = false) {
+  const suffix = fallbackOriginal ? '?fallback=original' : '';
+  return getDown(`/api/v1/knowledge/${id}/preview${suffix}`);
+}
+
+export interface KBAccessMember {
+  user_id: string
+  can_view: boolean
+  can_download: boolean
+}
+
+export interface KBAccessPolicy {
+  knowledge_base_id: string
+  visibility_mode: 'tenant' | 'restricted'
+  members: KBAccessMember[]
+  can_download?: boolean
+}
+
+export function getKnowledgeBaseAccess(id: string) {
+  return get(`/api/v1/knowledge-bases/${id}/access`)
+}
+
+export function putKnowledgeBaseAccess(
+  id: string,
+  data: { visibility_mode: string; members: KBAccessMember[] },
+) {
+  return put(`/api/v1/knowledge-bases/${id}/access`, data)
+}
+
+/** Queue a derived-PDF render for every Office document in the workspace. */
+export function backfillKnowledgePreviews() {
+  return post('/api/v1/knowledge/preview/backfill', {})
+}
+
+/** Artifact status distribution for the workspace (admin). */
+export function getPreviewBackfillStatus() {
+  return get('/api/v1/knowledge/preview/backfill/status')
+}
+
+/** Preview artifact state: pdf | pending | failed | original. */
+export function getKnowledgePreviewMeta(id: string, retry = false) {
+  const suffix = retry ? '?retry=1' : '';
+  return get(`/api/v1/knowledge/${id}/preview/meta${suffix}`);
 }
 
 /** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */
@@ -768,7 +809,7 @@ export function updateFAQEntryTagBatch(kbId: string, data: { updates: Record<num
   return put(`/api/v1/knowledge-bases/${kbId}/faq/entries/tags`, data);
 }
 
-const buildQuery = (params?: Record<string, any>) => {
+const buildQuery = (params?: Record<string, unknown>) => {
   if (!params) return '';
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -844,8 +885,7 @@ export function searchFAQEntries(
 // Export FAQ entries as CSV or JSON file
 export async function exportFAQEntries(kbId: string, format: 'csv' | 'json' = 'csv'): Promise<Blob> {
   const suffix = format === 'json' ? '?format=json' : ''
-  const response = await getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export${suffix}`)
-  return response as unknown as Blob
+  return getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export${suffix}`)
 }
 
 // FAQ Import Progress API

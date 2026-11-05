@@ -47,6 +47,8 @@ var versionedSQLiteTables = []string{
 	"notifications",
 	"session_sandbox_assignments",
 	"sandbox_user_machines",
+	"kb_user_access",
+	"knowledge_preview_artifacts",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -60,7 +62,8 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenants":               {"api_principal_config"},                                      // 000064
 	"users":                 {"is_system_admin"},                                           // 000053
 	"knowledges":            {"pending_subtasks_count", "profile"},                         // 000056, 000101
-	"knowledge_bases":       {"profile_config", "generated_profile"},                       // 000101
+	"knowledge_bases":       {"profile_config", "generated_profile", "visibility_mode"},    // 000101, 000134
+	"tenant_api_keys":       {"owner_user_id"},                                             // 000134
 	// 000034/085/097/105/119
 	"messages": {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint", "run_state"},
 	"sessions": {
@@ -72,8 +75,8 @@ var versionedSQLiteColumns = map[string][]string{
 	},
 	"session_sandbox_assignments": {"released_at", "cleanup_due_at"},    // 000047
 	"tenant_invitations":          {"token", "accepted_count"},          // 000054
-	"embed_channels":              {"allow_memory"},                     // 000060
-	"im_channels":                 {"locale"},                           // 000030
+	"embed_channels":              {"allow_memory", "owner_user_id"},    // 000060, 000134
+	"im_channels":                 {"locale", "owner_user_id"},          // 000030, 000134
 	"chunks":                      {"source_locators"},                  // 000033
 	"mcp_oauth_tokens":            {"principal_type", "principal_id"},   // 000064
 	"mcp_tool_approvals":          {"enabled", "risk", "observed_risk"}, // 000091, 000126
@@ -88,7 +91,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 50
+const expectedSQLiteMigrationVersion = 52
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -282,6 +285,52 @@ func TestSQLiteSandboxAllocationMigrationRollsBack(t *testing.T) {
 	require.True(t, sqliteTableExists(t, sqlDB, "session_sandbox_assignments"))
 	require.True(t, sqliteTableExists(t, sqlDB, "sandbox_user_machines"))
 	require.True(t, sqliteIndexExists(t, sqlDB, "idx_session_sandbox_assignments_live_machine"))
+}
+
+// The per-user KB access migration must come back off cleanly: the grant
+// table and every machine-principal column disappear, and re-applying it
+// restores them. Guards rollback safety for deployments that enable the
+// feature before deciding to revert.
+func TestSQLiteKBUserAccessMigrationRollsBack(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	chdirAndRestore(t, repoRoot)
+
+	dbPath := filepath.Join(t.TempDir(), "kb-access-down.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+
+	db := openSQLiteDB(t, dbPath)
+	require.True(t, sqliteTableExists(t, db, "kb_user_access"))
+	require.True(t, sqliteColumnExists(t, db, "knowledge_bases", "visibility_mode"))
+	require.True(t, sqliteColumnExists(t, db, "tenant_api_keys", "owner_user_id"))
+	require.True(t, sqliteColumnExists(t, db, "im_channels", "owner_user_id"))
+	require.True(t, sqliteColumnExists(t, db, "embed_channels", "owner_user_id"))
+	require.True(t, sqliteIndexExists(t, db, "idx_kb_user_access_kb_user"))
+
+	sqlDB, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{})
+	require.NoError(t, err)
+	m, err := migrate.NewWithDatabaseInstance("file://migrations/sqlite", "sqlite3", driver)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = m.Close() })
+
+	require.NoError(t, m.Migrate(50))
+	version, dirty := sqliteMigrationState(t, sqlDB)
+	require.Equal(t, 50, version)
+	require.False(t, dirty)
+	require.False(t, sqliteTableExists(t, sqlDB, "kb_user_access"), "down must drop the grant table")
+	require.False(t, sqliteColumnExists(t, sqlDB, "knowledge_bases", "visibility_mode"))
+	require.False(t, sqliteColumnExists(t, sqlDB, "tenant_api_keys", "owner_user_id"))
+	require.False(t, sqliteColumnExists(t, sqlDB, "im_channels", "owner_user_id"))
+	require.False(t, sqliteColumnExists(t, sqlDB, "embed_channels", "owner_user_id"))
+
+	require.NoError(t, m.Migrate(51))
+	version, dirty = sqliteMigrationState(t, sqlDB)
+	require.Equal(t, 51, version)
+	require.False(t, dirty)
+	require.True(t, sqliteTableExists(t, sqlDB, "kb_user_access"))
+	require.True(t, sqliteColumnExists(t, sqlDB, "knowledge_bases", "visibility_mode"))
 }
 
 func sqliteRepoRoot(t *testing.T) string {

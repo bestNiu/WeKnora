@@ -825,6 +825,7 @@ import {
   wrapChatMarkdownTables,
 } from '@/utils/chatMarkdownRenderer';
 import { getChunkByIdOnly, getKnowledgeDetails } from '@/api/knowledge-base';
+import { parseSourceLocators } from '@/utils/sourceLocator';
 import { WEKNORA_ENTITY_LINK_CLASS, type WeKnoraEntityKind } from '@/utils/weknoraEntityLinks';
 import {
   appendMermaidSvgCache,
@@ -1092,13 +1093,64 @@ const resolveEntityRoute = async (kind: WeKnoraEntityKind, id: string) => {
   };
 };
 
+// A document/chunk handle resolves to the document and its knowledge base, then
+// opens inside the chat reference drawer so a list item previews in place.
+// Returns false when the drawer is unavailable or the lookup fails, letting the
+// caller fall back to the previous navigation behaviour.
+const openWeKnoraEntityInDrawer = async (
+  kind: WeKnoraEntityKind,
+  id: string,
+): Promise<boolean> => {
+  if (!referencesDrawer) return false;
+  try {
+    if (kind === 'doc') {
+      const res: any = await getKnowledgeDetails(id);
+      const data = res?.data;
+      if (!data) return false;
+      // Seed the list so "back" still shows the message's sources; the drawer
+      // opens even when the message has none, because openSource sets the panel.
+      openReferencesDrawer();
+      referencesDrawer.openSource({
+        knowledgeId: id,
+        knowledgeBaseId: data.knowledge_base_id,
+        title: data.title,
+        fileName: data.file_name,
+        knowledgeSource: data.source,
+      });
+      return true;
+    }
+    const res: any = await getChunkByIdOnly(id);
+    const data = res?.data;
+    if (!data?.knowledge_id) return false;
+    openReferencesDrawer();
+    referencesDrawer.openSource({
+      chunkId: id,
+      knowledgeId: data.knowledge_id,
+      knowledgeBaseId: data.knowledge_base_id,
+      title: data.knowledge_title,
+      fileName: data.knowledge_filename,
+      content: data.content,
+      locators: parseSourceLocators(data.source_locators),
+    });
+    return true;
+  } catch (error) {
+    console.error('Failed to open the WeKnora entity in the reference drawer:', error);
+    return false;
+  }
+};
+
 // Documents and chunks need a lookup to find their knowledge base, so the tab
 // is opened synchronously (keeping the click's popup permission) and pointed
 // at the route once it resolves. Access is still checked by the target page.
-const openWeKnoraEntity = async (el: HTMLElement) => {
+const openWeKnoraEntity = async (el: HTMLElement, options: { newTab?: boolean } = {}) => {
   const kind = el.getAttribute('data-entity-kind') as WeKnoraEntityKind | null;
   const id = el.getAttribute('data-entity-id') || '';
   if (!kind || !id || props.embedToken) return;
+  if (!options.newTab && (kind === 'doc' || kind === 'chunk')) {
+    if (await openWeKnoraEntityInDrawer(kind, id)) return;
+    MessagePlugin.warning(t('agentStream.citation.loadFailed'));
+    return;
+  }
   const win = kind === 'kb' ? null : window.open('about:blank', '_blank');
   try {
     const route = await resolveEntityRoute(kind, id);
@@ -1603,6 +1655,24 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
         knowledge_base_id: item.knowledge_base_id,
         chunk_index: index + 1,
         content: item.match_snippet || '',
+      })));
+  }
+
+  if (toolName === 'list_documents') {
+    const documents = Array.isArray(toolData.documents) ? toolData.documents : [];
+    return mergeDocumentReferences(documents
+      .filter((item: any) => item?.knowledge_id)
+      .map((item: any, index: number) => ({
+        // No chunk id: a listed document is a navigation target, not a cited
+        // passage, so the drawer opens it at its first page.
+        id: item.knowledge_id,
+        knowledge_id: item.knowledge_id,
+        knowledge_title: item.title || item.file_name || item.knowledge_id,
+        knowledge_filename: item.file_name || undefined,
+        knowledge_base_id: item.knowledge_base_id || toolData.knowledge_base_id,
+        chunk_index: index + 1,
+        chunk_type: 'document',
+        content: item.description || '',
       })));
   }
 
@@ -2581,7 +2651,7 @@ const getKbIdForWiki = (slug: string): string => {
   return '';
 };
 
-const onRootClick = (e: Event) => {
+const onRootClick = (e: MouseEvent) => {
   const target = e.target as HTMLElement;
   if (!target) return;
 
@@ -2653,7 +2723,9 @@ const onRootClick = (e: Event) => {
   if (entityEl) {
     e.preventDefault();
     e.stopPropagation();
-    void openWeKnoraEntity(entityEl);
+    void openWeKnoraEntity(entityEl, {
+      newTab: e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1,
+    });
     return;
   }
 
@@ -2749,7 +2821,7 @@ const onRootKeydown = (e: KeyboardEvent) => {
   if (entityEl) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      void openWeKnoraEntity(entityEl);
+      void openWeKnoraEntity(entityEl, { newTab: e.ctrlKey || e.metaKey });
     }
     return;
   }

@@ -38,6 +38,7 @@ const (
 	ChannelRSS              = "rss"               // RSS / Atom feed
 	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
 	ChannelSeafile          = "seafile"           // Seafile
+	ChannelEdoc             = "edoc"              // eDoc (易道 / edoc2 ECM)
 )
 
 // Knowledge parse status constants
@@ -171,6 +172,10 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id" extensions:"x-agent"`
+	// CanDownload is computed per request for API responses and never
+	// persisted: true when the caller may download the original file (Owner,
+	// Admin, KB creator, or an explicit per-user grant).
+	CanDownload bool `json:"can_download,omitempty" gorm:"-"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-" extensions:"x-agent"`
 	// Type of the knowledge

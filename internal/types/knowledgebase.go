@@ -75,6 +75,10 @@ type KnowledgeBase struct {
 	// Nullable for backward compatibility with rows created before the
 	// RBAC migration backfilled the column to the workspace Owner.
 	CreatorID string `yaml:"creator_id"              json:"creator_id"              gorm:"type:varchar(36);index"`
+	// VisibilityMode narrows reads to explicit kb_user_access grants when set
+	// to "restricted". Empty normalizes to "tenant", the pre-existing
+	// behaviour, so rows written before this column existed stay readable.
+	VisibilityMode string `yaml:"visibility_mode"          json:"visibility_mode"         gorm:"type:varchar(16);not null;default:'tenant'" extensions:"x-agent,x-agent-detail"`
 	// Chunking configuration
 	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"         gorm:"type:json" extensions:"x-agent,x-agent-detail"`
 	// Image processing configuration
@@ -922,6 +926,17 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled && !kb.IndexingStrategy.GraphEnabled {
 		kb.IndexingStrategy.GraphEnabled = true
 	}
+}
+
+// Visibility returns the normalized read-visibility mode.
+//
+// Empty or unknown values normalize to KBVisibilityTenant so a malformed row
+// cannot narrow reads by accident; only an explicit "restricted" does.
+func (kb *KnowledgeBase) Visibility() KBVisibilityMode {
+	if kb == nil {
+		return KBVisibilityTenant
+	}
+	return KBVisibilityMode(kb.VisibilityMode).Normalize()
 }
 
 // KBCapabilities describes the functional features a knowledge base exposes.

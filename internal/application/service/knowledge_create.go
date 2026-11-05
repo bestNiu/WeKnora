@@ -287,6 +287,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	enqueueDataTableSummaryIfNeeded(ctx, s.task, tenantID, knowledge.ID, safeFilename, getFileType(safeFilename), kb.SummaryModelID, kb.EmbeddingModelID)
 
 	logger.Infof(ctx, "Knowledge from file created successfully, ID: %s", knowledge.ID)
+	enqueueKnowledgePreview(ctx, knowledge)
 	return knowledge, nil
 }
 
@@ -473,6 +474,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	logger.Infof(ctx, "Enqueued URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
 
 	logger.Infof(ctx, "Knowledge from URL created successfully, ID: %s", knowledge.ID)
+	enqueueKnowledgePreview(ctx, knowledge)
 	return knowledge, nil
 }
 
@@ -862,6 +864,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 			})
 	}
 
+	enqueueKnowledgePreview(ctx, knowledge)
 	return knowledge, nil
 }
 
@@ -1168,7 +1171,10 @@ func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowl
 
 func usesSourceIdentityDuplicateCheck(channel string) bool {
 	switch channel {
-	case types.ConnectorTypeGitLab, types.ChannelConfluence, types.ChannelSeafile:
+	// Datasource channels mirror an external tree: two documents that arrive
+	// with different source identities are distinct even when their bytes are
+	// identical (a bid folder often holds the same deck under two names).
+	case types.ConnectorTypeGitLab, types.ChannelConfluence, types.ChannelSeafile, types.ChannelEdoc:
 		return true
 	default:
 		return false
