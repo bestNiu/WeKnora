@@ -157,6 +157,9 @@ export interface CustomAgent {
   created_by?: string;
   // creator_name 由后端 list 接口批量回填，仅用于列表卡片来源徽章。
   creator_name?: string;
+  // visibility_mode 由后端根据 agent_access_policy 回填：tenant=空间成员可见，
+  // allowlist=仅指定成员（+创建者/管理员）可见。默认 tenant。
+  visibility_mode?: 'tenant' | 'allowlist';
   config: CustomAgentConfig;
   created_at?: string;
   updated_at?: string;
@@ -210,6 +213,31 @@ export function listAgents(params?: {
 // 获取智能体详情
 export function getAgentById(id: string) {
   return get<{ data: CustomAgent }>(`/api/v1/agents/${id}`);
+}
+
+// 智能体成员可见性
+export interface AgentAccessMember {
+  user_id: string;
+  can_view: boolean;
+}
+
+export interface AgentAccessPolicy {
+  agent_id: string;
+  visibility_mode: 'tenant' | 'allowlist';
+  members: AgentAccessMember[];
+}
+
+// 获取智能体的成员可见性策略
+export function getAgentAccess(id: string) {
+  return get<{ data: AgentAccessPolicy }>(`/api/v1/agents/${id}/access`);
+}
+
+// 替换智能体的成员可见性策略
+export function putAgentAccess(
+  id: string,
+  data: { visibility_mode: string; members: AgentAccessMember[] },
+) {
+  return put<{ data: AgentAccessPolicy }>(`/api/v1/agents/${id}/access`, data);
 }
 
 // 创建智能体

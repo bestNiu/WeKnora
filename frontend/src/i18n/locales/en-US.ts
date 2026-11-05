@@ -8821,5 +8821,20 @@ export default {
       description:
         'Observe the image attributes and describe the image first, then decide from the attributes whether to run OCR, saving model calls and speeding up parsing. When the image is recognised as a photograph of a correctable page or label, it is straightened and cropped before recognition to improve OCR accuracy; if that fails, the original image is used.'
     }
-  }
+  },
+  agentAccess: {
+    menu: 'Member visibility',
+    title: 'Member visibility · {name}',
+    hint: 'Choose which workspace members can see and use this agent. The creator and admins always have access.',
+    modeTenant: 'All members',
+    modeAllowlist: 'Selected members',
+    allowlistHint: 'Only the selected members (plus the creator and admins) can see and use this agent.',
+    implicit: 'Always visible',
+    empty: 'No selectable members in this workspace',
+    badge: 'Selected members',
+    badgeHint: 'Visible only to selected members, the creator and admins',
+    saved: 'Member visibility updated',
+    saveFailed: 'Save failed, please retry',
+    loadFailed: 'Failed to load member visibility',
+  },
 }

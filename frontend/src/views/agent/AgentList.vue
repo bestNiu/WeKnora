@@ -193,6 +193,11 @@
                       <div v-if="authStore.hasRole('contributor')" class="popup-menu-item" @click="handleCopy(agent)">
                         <t-icon class="menu-icon" name="file-copy" /><span>{{ $t('common.copy') }}</span>
                       </div>
+                      <div v-if="canManageAgent(agent) || authStore.hasRole('admin')" class="popup-menu-item"
+                        @click="handleOpenAccess(agent)">
+                        <t-icon class="menu-icon" name="usergroup" />
+                        <span>{{ $t('agentAccess.menu') }}</span>
+                      </div>
                       <div v-if="authStore.hasRole('admin')" class="popup-menu-item"
                         @click="handleToggleDisabled(agent)">
                         <t-icon class="menu-icon" name="poweroff" />
@@ -218,6 +223,11 @@
                         <t-icon class="menu-icon" name="poweroff" />
                         <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
                       </div>
+                      <div v-if="authStore.hasRole('admin')" class="popup-menu-item"
+                        @click="handleOpenAccess(agent)">
+                        <t-icon class="menu-icon" name="usergroup" />
+                        <span>{{ $t('agentAccess.menu') }}</span>
+                      </div>
                     </div>
                   </template>
                 </t-popup>
@@ -235,6 +245,12 @@
                     <t-tag v-if="!agent.isMine && agent.disabled_by_me" theme="default" size="small"
                       class="disabled-badge">{{
                         $t('agent.disabled') }}</t-tag>
+                    <t-tooltip v-if="agent.visibility_mode === 'allowlist'"
+                      :content="$t('agentAccess.badgeHint')" placement="top">
+                      <t-tag theme="warning" variant="light" size="small">
+                        {{ $t('agentAccess.badge') }}
+                      </t-tag>
+                    </t-tooltip>
                     <t-tooltip
                       :content="agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.mode.agent') : $t('agent.mode.normal')"
                       placement="top">
@@ -377,6 +393,11 @@
                         <t-icon class="menu-icon" name="poweroff" />
                         <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
                       </div>
+                      <div v-if="canManageAgent(agent) || authStore.hasRole('admin')" class="popup-menu-item"
+                        @click="handleOpenAccess(agent)">
+                        <t-icon class="menu-icon" name="usergroup" />
+                        <span>{{ $t('agentAccess.menu') }}</span>
+                      </div>
                       <div v-if="!agent.is_builtin && canManageAgent(agent)" class="popup-menu-item delete"
                         @click="handleDelete(agent)">
                         <t-icon class="menu-icon" name="delete" />
@@ -400,6 +421,12 @@
                   <div class="feature-badges">
                     <t-tag v-if="agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{
                       $t('agent.disabled') }}</t-tag>
+                    <t-tooltip v-if="agent.visibility_mode === 'allowlist'"
+                      :content="$t('agentAccess.badgeHint')" placement="top">
+                      <t-tag theme="warning" variant="light" size="small">
+                        {{ $t('agentAccess.badge') }}
+                      </t-tag>
+                    </t-tooltip>
                     <t-tooltip
                       :content="agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.mode.agent') : $t('agent.mode.normal')"
                       placement="top">
@@ -721,6 +748,8 @@
 
     <TenantModelsGuide :when="showAgentTenantModelsGuide" variant="agent" />
     <ContextualGuide tour="agentList" :when="showAgentListContextualGuide" />
+
+    <AgentAccessDialog v-model:visible="accessDialogVisible" :agent="accessAgent" @saved="refreshAfterAccessChange" />
   </div>
 </template>
 
@@ -742,6 +771,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useMenuStore } from '@/stores/menu'
 import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organization'
 import AgentEditorModal from './AgentEditorModal.vue'
+import AgentAccessDialog from './AgentAccessDialog.vue'
 import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import ContextualGuide from '@/components/ContextualGuide.vue'
 import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
@@ -1074,6 +1104,20 @@ const fetchList = (force = false) => {
     const counts = orgStore.resourceCounts?.agents?.by_organization
     if (counts) spaceAgentCountByOrg.value = { ...counts }
   })
+}
+
+// Member visibility dialog: creator or Admin+ edits the allowlist, and the
+// refreshed list picks up the new visibility_mode badge.
+const accessDialogVisible = ref(false)
+const accessAgent = ref<CustomAgent | null>(null)
+
+function handleOpenAccess(agent: CustomAgent) {
+  accessAgent.value = agent
+  accessDialogVisible.value = true
+}
+
+function refreshAfterAccessChange() {
+  void fetchList(true)
 }
 
 // 检查 URL 参数并打开编辑模态框

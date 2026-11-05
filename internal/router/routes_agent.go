@@ -20,7 +20,10 @@ import (
 // their agent, otherwise Admin+ is required. Built-in agents
 // (IsBuiltin=true) have an empty creator and are always Admin+. Reads
 // are Viewer+, copy is Contributor+ (the copy is owned by the caller).
-func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler, g *rbacGuards) {
+func RegisterCustomAgentRoutes(
+	r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler,
+	accessHandler *handler.AgentAccessHandler, g *rbacGuards,
+) {
 	agents := g.apiKeyGroup(r.Group("/agents"), apiKeyFullAccess())
 	// agentsRead are the agent read endpoints. They stay full-access only for
 	// plain scoped keys (agent config can carry sensitive model/MCP bindings),
@@ -50,6 +53,11 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsWrite.DELETE("/:id", g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
 		// Copy agent — Contributor+ (copy is owned by the caller)
 		agentsWrite.POST("/:id/copy", g.Contributor(), agentHandler.CopyAgent)
+		if accessHandler != nil {
+			// Member visibility policy — creator OR Admin+ (same as edit)
+			agentsRead.GET("/:id/access", g.OwnedAgentOrAdmin(), accessHandler.GetAgentAccess)
+			agentsWrite.PUT("/:id/access", g.OwnedAgentOrAdmin(), accessHandler.PutAgentAccess)
+		}
 	}
 	// Registered outside the group to avoid Gin route conflict with /agents/:id/shares in organization routes
 	g.apiKeyRoute(r, http.MethodGet, "/agents/:id/suggested-questions",

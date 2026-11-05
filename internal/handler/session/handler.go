@@ -29,6 +29,7 @@ type Handler struct {
 	config               *config.Config                  // Application configuration
 	knowledgebaseService interfaces.KnowledgeBaseService // Service for managing knowledge bases
 	customAgentService   interfaces.CustomAgentService   // Service for managing custom agents
+	agentAccessService   interfaces.AgentAccessService   // Per-member agent visibility
 	tenantService        interfaces.TenantService        // Service for loading tenant (shared agent context)
 	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
 	kbShareService       interfaces.KBShareService       // Service for resolving shared KB permissions
@@ -92,6 +93,7 @@ func NewHandler(
 	config *config.Config,
 	knowledgebaseService interfaces.KnowledgeBaseService,
 	customAgentService interfaces.CustomAgentService,
+	agentAccessService interfaces.AgentAccessService,
 	tenantService interfaces.TenantService,
 	agentShareService interfaces.AgentShareService,
 	kbShareService interfaces.KBShareService,
@@ -128,6 +130,7 @@ func NewHandler(
 		config:                config,
 		knowledgebaseService:  knowledgebaseService,
 		customAgentService:    customAgentService,
+		agentAccessService:    agentAccessService,
 		tenantService:         tenantService,
 		agentShareService:     agentShareService,
 		kbShareService:        kbShareService,

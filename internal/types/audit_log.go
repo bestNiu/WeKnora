@@ -179,6 +179,7 @@ const (
 	AuditActionDataSourceResumed       AuditAction = "datasource.resumed"
 
 	AuditActionKBAccessUpdated          AuditAction = "kb.access_updated"
+	AuditActionAgentAccessUpdated       AuditAction = "agent.access_updated"
 	AuditActionKBShareAdded             AuditAction = "kb.share_added"
 	AuditActionKBSharePermissionChanged AuditAction = "kb.share_permission_changed"
 	AuditActionKBShareRemoved           AuditAction = "kb.share_removed"

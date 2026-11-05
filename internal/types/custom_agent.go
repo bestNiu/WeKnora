@@ -127,6 +127,12 @@ type CustomAgent struct {
 	// 让前端列表卡片区分「我创建」与「同空间其他成员创建」。不落库，内建 agent / 老数据
 	// 仍可能为空。
 	CreatorName string `yaml:"-" json:"creator_name,omitempty" gorm:"-" extensions:"x-agent"`
+
+	// VisibilityMode is the effective member visibility (tenant|allowlist).
+	// It is resolved from agent_access_policy by the list/get handlers and is
+	// never persisted on the agent row, so agent config writes cannot clobber
+	// an access policy.
+	VisibilityMode string `yaml:"-" json:"visibility_mode,omitempty" gorm:"-" extensions:"x-agent"`
 }
 
 // maxAgentAvatarLength mirrors the custom_agents.avatar column limit

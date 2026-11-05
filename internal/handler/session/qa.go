@@ -272,6 +272,21 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewNotFoundError("Shared agent not found")
 	}
 
+	// Per-member visibility: a caller who cannot see an allowlist agent must
+	// get the same not-found as a missing agent, so its existence does not
+	// leak. A shared agent is an explicit grant from another workspace and the
+	// decision helper exempts it, as it does the creator and Owner/Admin.
+	if customAgent != nil && h.agentAccessService != nil {
+		caller := types.CallerFromContext(ctx)
+		decision, accessErr := h.agentAccessService.Decide(
+			ctx, customAgent, caller, types.IsSystemAdminFromContext(ctx))
+		if accessErr != nil {
+			logger.Warnf(ctx, "Failed to resolve agent visibility: %v", accessErr)
+		} else if !decision.Visible {
+			return nil, nil, errors.NewNotFoundError("Agent not found")
+		}
+	}
+
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIDs, request.MentionedItems)
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {

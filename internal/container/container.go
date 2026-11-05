@@ -189,6 +189,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAgentPromptRepository))
 	must(container.Provide(repository.NewAgentGrantRepository))
 	must(container.Provide(repository.NewKBUserAccessRepository))
+	must(container.Provide(repository.NewAgentAccessRepository))
 	must(container.Provide(repository.NewPreviewArtifactRepository))
 	must(container.Provide(repository.NewAgentRunSuspensionRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -270,6 +271,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewGraphSearchService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBUserAccessService))
+	must(container.Provide(service.NewAgentAccessService))
 	must(
 		container.Provide(service.NewKBShareService),
 	) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
@@ -769,6 +771,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewVectorStoreHandler))
 	must(container.Provide(handler.NewStorageBackendHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
+	must(container.Provide(handler.NewAgentAccessHandler))
 	must(container.Provide(handler.NewUserResourceFavoriteHandler))
 	must(container.Provide(func(
 		s *service.TenantSkillService, agents interfaces.AgentShareService,

@@ -42,6 +42,9 @@ type CustomAgentHandler struct {
 	usableSkills       usableSkillLister
 	webSearchProviders interfaces.WebSearchProviderRepository
 	desktop            bool
+	// accessService resolves per-member agent visibility. Optional: nil in
+	// partially-wired unit tests, where every agent is treated as visible.
+	accessService interfaces.AgentAccessService
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
@@ -54,6 +57,7 @@ func NewCustomAgentHandler(
 	host service.HostSandboxManager,
 	usableSkills *service.TenantSkillService,
 	webSearchProviders interfaces.WebSearchProviderRepository,
+	accessService interfaces.AgentAccessService,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
 		service:            service,
@@ -64,6 +68,7 @@ func NewCustomAgentHandler(
 		usableSkills:       usableSkills,
 		webSearchProviders: webSearchProviders,
 		desktop:            host.Desktop,
+		accessService:      accessService,
 	}
 }
 
@@ -348,6 +353,23 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 		return
 	}
 
+	// Per-member visibility: a caller who cannot see an allowlist agent must
+	// get the same 404 as a missing agent so its existence does not leak.
+	if h.accessService != nil {
+		caller := types.CallerFromContext(ctx)
+		decision, accessErr := h.accessService.Decide(
+			ctx, agent, caller, types.IsSystemAdminFromContext(ctx))
+		if accessErr != nil {
+			logger.Warnf(ctx, "Failed to resolve agent visibility: %v", accessErr)
+		} else if !decision.Visible {
+			c.Error(errors.NewNotFoundError("Agent not found"))
+			return
+		}
+		if mode, modeErr := h.accessService.Policy(ctx, agent.TenantID, agent.ID); modeErr == nil {
+			agent.VisibilityMode = string(mode.Normalize())
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    agent,
@@ -437,6 +459,10 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	// 内建 agent（IsBuiltin=true, CreatedBy=""）不会有 creator_name，前端按 builtin
 	// 分支单独渲染。
 	enrichAgentCreatorNames(ctx, h.userService, agents)
+	// Per-member visibility: a caller who cannot see an allowlist agent must
+	// not learn it exists, so hidden agents are removed from the list rather
+	// than returned with a flag.
+	agents = h.filterVisibleAgents(c, agents)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":                true,
@@ -480,6 +506,54 @@ func enrichAgentCreatorNames(ctx context.Context, userSvc interfaces.UserService
 		}
 		ag.CreatorName = pickUserDisplayName(u)
 	}
+}
+
+// filterVisibleAgents drops agents the caller may not see and stamps the
+// effective visibility mode on the rest (admins use it to render the
+// "selected members" badge). Errors fall back to the pre-existing
+// tenant-wide behaviour so a policy-table problem cannot blank the list.
+func (h *CustomAgentHandler) filterVisibleAgents(
+	c *gin.Context, agents []*types.CustomAgent,
+) []*types.CustomAgent {
+	if h.accessService == nil || len(agents) == 0 {
+		return agents
+	}
+	ctx := c.Request.Context()
+	caller := types.CallerFromContext(ctx)
+	systemAdmin := types.IsSystemAdminFromContext(ctx)
+
+	ids := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		if agent != nil {
+			ids = append(ids, agent.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return agents
+	}
+	// Policies are tenant-scoped; the list is tenant-scoped too (shared
+	// agents are resolved elsewhere), so one lookup covers it.
+	modes, err := h.accessService.Policies(ctx, caller.TenantID, ids)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve agent visibility modes: %v", err)
+	}
+	decisions, err := h.accessService.DecideMany(ctx, agents, caller, systemAdmin)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve agent visibility: %v", err)
+		return agents
+	}
+	visible := make([]*types.CustomAgent, 0, len(agents))
+	for _, agent := range agents {
+		if agent == nil {
+			continue
+		}
+		if decision, ok := decisions[agent.ID]; ok && !decision.Visible {
+			continue
+		}
+		agent.VisibilityMode = string(modes[agent.ID].Normalize())
+		visible = append(visible, agent)
+	}
+	return visible
 }
 
 // UpdateAgent godoc

@@ -24,7 +24,11 @@ var (
 	// workspace has its own copy under the same ID, so a shared built-in would
 	// be indistinguishable from the receiver's own agent.
 	ErrBuiltinAgentNotShareable = errors.New("built-in agents cannot be shared")
-	ErrAgentNotConfigured       = errors.New(
+	// ErrAgentRestrictedNotShareable is returned for an allowlist agent:
+	// its workspace already restricted it to selected members, so sharing it
+	// to another organization would contradict that restriction.
+	ErrAgentRestrictedNotShareable = errors.New("agents restricted to selected members cannot be shared")
+	ErrAgentNotConfigured          = errors.New(
 		"agent is not fully configured (missing required chat model, or rerank model when the search_knowledge " +
 			"tool is enabled)",
 	)
@@ -128,6 +132,7 @@ type agentShareService struct {
 	userRepo              interfaces.UserRepository
 	webSearchProviderRepo interfaces.WebSearchProviderRepository
 	kbRepo                interfaces.KnowledgeBaseRepository
+	accessRepo            interfaces.AgentAccessRepository
 }
 
 // NewAgentShareService creates a new agent share service
@@ -139,6 +144,7 @@ func NewAgentShareService(
 	userRepo interfaces.UserRepository,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbRepo interfaces.KnowledgeBaseRepository,
+	accessRepo interfaces.AgentAccessRepository,
 ) interfaces.AgentShareService {
 	return &agentShareService{
 		shareRepo:             shareRepo,
@@ -148,6 +154,7 @@ func NewAgentShareService(
 		userRepo:              userRepo,
 		webSearchProviderRepo: webSearchProviderRepo,
 		kbRepo:                kbRepo,
+		accessRepo:            accessRepo,
 	}
 }
 
@@ -222,6 +229,19 @@ func (s *agentShareService) ShareAgent(ctx context.Context, agentID string, orgI
 	}
 	if isBuiltinAgent(agent) {
 		return nil, ErrBuiltinAgentNotShareable
+	}
+	// An allowlist agent is restricted to selected members inside its own
+	// workspace; sharing it to another organization would contradict that
+	// restriction. Existing shares are left alone so external consumers are
+	// not broken by flipping the mode.
+	if s.accessRepo != nil {
+		mode, modeErr := s.accessRepo.GetPolicy(ctx, tenantID, agentID)
+		if modeErr != nil {
+			return nil, modeErr
+		}
+		if mode.Normalize() == types.AgentVisibilityAllowlist {
+			return nil, ErrAgentRestrictedNotShareable
+		}
 	}
 	if err := checkAgentKBScopeShareable(ctx, s.kbRepo.GetKnowledgeBaseByIDs, nil, agent, userID); err != nil {
 		return nil, err

@@ -1416,6 +1416,10 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 			_ = c.Error(apperrors.NewForbiddenError(err.Error()))
 			return
 		}
+		if errors.Is(err, service.ErrAgentRestrictedNotShareable) {
+			_ = c.Error(apperrors.NewValidationError(err.Error()))
+			return
+		}
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
 	}

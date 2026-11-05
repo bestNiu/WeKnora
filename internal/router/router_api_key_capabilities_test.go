@@ -150,7 +150,7 @@ func TestAgentReadRoutesDeclareReadAgentsCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterCustomAgentRoutes(v1, &handler.CustomAgentHandler{}, g)
+	RegisterCustomAgentRoutes(v1, &handler.CustomAgentHandler{}, nil, g)
 
 	cases := []struct {
 		method string
@@ -188,7 +188,7 @@ func TestAgentWriteRoutesRequireManageAgentsCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterCustomAgentRoutes(v1, &handler.CustomAgentHandler{}, g)
+	RegisterCustomAgentRoutes(v1, &handler.CustomAgentHandler{}, nil, g)
 
 	cases := []struct {
 		method string
