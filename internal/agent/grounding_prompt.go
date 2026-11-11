@@ -50,6 +50,10 @@ func formatGroundingGuidance(names []string) string {
 			"With an explicit source selection, KB retrieval is complementary, not a prerequisite. " +
 			"Directory entries are routing hints, not retrieved evidence; do not exhaust unrelated " +
 			"bases. Choose an available search or reader appropriate to the scope.\n")
+		b.WriteString("- Name a source by its title when you mention it (\"replace the SSU page with " +
+			"《…》\", not \"replace it with doc://7\" or a bare UUID). Link a source at most once, as " +
+			"[title](handle), and do not restate the same source in the body, a summary and a closing " +
+			"note: say each caveat once, where it belongs.\n")
 	}
 	if slices.Contains(names, tools.ToolWebSearch) {
 		b.WriteString("- web_search is available: use it when relevant local evidence is missing, " +

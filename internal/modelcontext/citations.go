@@ -17,9 +17,9 @@ const sourceHandleProtocolPrompt = `
 Retrieved content uses request-local source handles: chunk://N identifies a knowledge chunk, url://N a web page,
   doc://N a document, and kb://N a knowledge base.
 - Copy handles exactly, in this form, wherever you refer to the source: tool arguments, instructions or prompts
-  you write for other agents or automations, Markdown links, and your answer. The system replaces them with the
-  real URL or a stable reference after generation, so a handle in saved text still points to the same source
-  later.
+  you write for other agents or automations, and the target of one Markdown link. In prose, name a source by its
+  title, never by its handle or ID. The system replaces a linked handle with the real URL or a stable reference
+  after generation, so a handle in saved text still points to the same source later.
 - Never invent a handle or change its number, and never write raw chunk IDs, knowledge IDs, or knowledge-base IDs.
   This does not change separate instructions to preserve retrieved Markdown image URLs.`
 
