@@ -88,7 +88,8 @@
                     :title="$t('agent.copy')">
                     <ChatActionIcon name="copy" />
                 </t-button>
-                <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
+                <!-- 暂时隐藏「添加到知识库」（在线编辑 Markdown）入口，改回 true 即恢复 -->
+                <t-button v-if="false" size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
                     :title="$t('agent.addToKnowledgeBase')">
                     <ChatActionIcon name="bookmark-add" />
                 </t-button>

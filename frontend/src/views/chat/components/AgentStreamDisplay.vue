@@ -493,7 +493,8 @@
                   :title="$t('agent.copy')" :aria-label="$t('agent.copy')">
                   <ChatActionIcon name="copy" />
                 </t-button>
-                <t-button v-if="!embeddedMode" size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
+                <!-- 暂时隐藏「添加到知识库」（在线编辑 Markdown）入口，改回 !embeddedMode 即恢复 -->
+                <t-button v-if="false" size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
                   :title="$t('agent.addToKnowledgeBase')">
                   <ChatActionIcon name="bookmark-add" />
                 </t-button>
