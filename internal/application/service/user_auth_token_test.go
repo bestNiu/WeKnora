@@ -122,6 +122,18 @@ func (s *stubUserRepoForAuth) SearchUsers(context.Context, string, int) ([]*type
 	return nil, nil
 }
 
+// Identity stubs: this fixture predates external identities, so every lookup is
+// "unbound" and binds are accepted without persistence.
+func (s *stubUserRepoForAuth) GetUserIdentity(context.Context, string, string) (*types.UserIdentity, error) {
+	return nil, nil
+}
+func (s *stubUserRepoForAuth) CreateUserIdentity(context.Context, *types.UserIdentity) error {
+	return nil
+}
+func (s *stubUserRepoForAuth) ListUserIdentities(context.Context, string) ([]*types.UserIdentity, error) {
+	return nil, nil
+}
+
 func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
 	return &userService{
 		userRepo: &stubUserRepoForAuth{

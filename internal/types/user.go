@@ -140,6 +140,48 @@ type User struct {
 	Tenant *Tenant `json:"tenant,omitempty" gorm:"foreignKey:TenantID"`
 }
 
+// IdentityProviderWeCom marks a user_identities row that maps a WeCom member
+// userid onto a local account. External providers store their stable subject
+// (not an email) so a renamed mailbox cannot silently rebind an account.
+const IdentityProviderWeCom = "wecom"
+
+// WeComLoginOptions is the server-side provisioning policy for a WeCom first
+// login. It is built from config, never from the request.
+type WeComLoginOptions struct {
+	// AutoProvision creates an account for an unbound member.
+	AutoProvision bool
+	// JoinTenantID is the workspace a new account joins (0 = default policy,
+	// i.e. a private workspace).
+	JoinTenantID uint64
+	// Role is granted in JoinTenantID; empty means viewer.
+	Role TenantRole
+	// Provisioning is the fallback tenant policy when JoinTenantID is 0.
+	Provisioning TenantProvisioningMode
+	// DisplayName is the member name read from the corporate directory. Empty
+	// when the app lacks the contacts permission, which only costs a readable
+	// username: the account still works.
+	DisplayName string
+	// Email is the member mailbox from the corporate directory. When it matches
+	// an existing local account, the login binds to that account instead of
+	// creating a duplicate.
+	Email string
+}
+
+// UserIdentity binds one external identity (provider + subject) to a local
+// user. Only one row may exist per (provider, subject).
+type UserIdentity struct {
+	ID        string    `json:"id"         gorm:"type:varchar(36);primaryKey"`
+	UserID    string    `json:"user_id"    gorm:"type:varchar(36);not null;index"`
+	Provider  string    `json:"provider"   gorm:"type:varchar(32);not null;uniqueIndex:idx_user_identity_subject"`
+	Subject   string    `json:"subject"    gorm:"type:varchar(128);not null;uniqueIndex:idx_user_identity_subject"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TableName keeps the table name explicit so the migration and the model
+// cannot drift apart through GORM pluralisation rules.
+func (UserIdentity) TableName() string { return "user_identities" }
+
 // AuthToken represents an authentication token
 type AuthToken struct {
 	// Unique identifier of the token

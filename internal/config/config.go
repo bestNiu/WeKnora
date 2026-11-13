@@ -25,6 +25,7 @@ type Config struct {
 	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
 	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
 	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
+	WeComAuth       *WeComAuthConfig       `yaml:"wecom_auth"       json:"wecom_auth"`
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
 	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
@@ -371,6 +372,41 @@ type OIDCAuthConfig struct {
 	UserInfoMapping       *OIDCUserInfoMapping `yaml:"user_info_mapping"      json:"user_info_mapping"`
 }
 
+// WeComAuthConfig configures the WeCom (企业微信) self-built-application web
+// login. WeCom's web authorization is NOT OpenID Connect: it returns a member
+// userid for a `code`, so it needs its own adapter rather than OIDCAuthConfig.
+type WeComAuthConfig struct {
+	Enable bool `yaml:"enable" json:"enable"`
+	// CorpID is the enterprise ID (企业ID).
+	CorpID string `yaml:"corp_id" json:"corp_id"`
+	// AgentID is the self-built application's AgentId.
+	AgentID int `yaml:"agent_id" json:"agent_id"`
+	// AgentSecret is the application secret. It must never reach the client
+	// or the repository, so it is masked in JSON.
+	AgentSecret string `yaml:"agent_secret" json:"-"`
+	// RedirectURI overrides the callback URL. Empty means "derive it from the
+	// request origin" (/api/v1/auth/wecom/callback), which keeps one config
+	// working behind several hostnames.
+	RedirectURI string `yaml:"redirect_uri" json:"redirect_uri"`
+	// AutoProvision creates a local account for a WeCom member with no bound
+	// identity. Off by default: an unknown member is told to ask an admin.
+	AutoProvision bool `yaml:"auto_provision" json:"auto_provision"`
+	// JoinTenantID is the workspace an auto-provisioned member joins. Without
+	// it they get a private workspace and see none of the shared knowledge
+	// bases, which is never what an enterprise deployment wants.
+	JoinTenantID uint64 `yaml:"join_tenant_id" json:"join_tenant_id"`
+	// DefaultRole is the role granted in JoinTenantID. Empty means "viewer".
+	DefaultRole string `yaml:"default_role" json:"default_role"`
+	// DisplayName labels the login button.
+	DisplayName string `yaml:"display_name" json:"display_name"`
+}
+
+// Enabled reports whether WeCom login is configured enough to serve requests.
+func (c *WeComAuthConfig) Enabled() bool {
+	return c != nil && c.Enable && strings.TrimSpace(c.CorpID) != "" &&
+		strings.TrimSpace(c.AgentSecret) != "" && c.AgentID != 0
+}
+
 // PromptTemplateI18n holds localized name and description for a prompt template.
 type PromptTemplateI18n struct {
 	Name        string `yaml:"name"        json:"name"`
@@ -631,6 +667,7 @@ func LoadConfig() (*Config, error) {
 
 	// Validate configuration values
 	applyOIDCEnvOverrides(&cfg)
+	applyWeComAuthEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyNetworkEnvOverrides()
@@ -677,6 +714,18 @@ func ValidateConfig(cfg *Config) error {
 		if strings.TrimSpace(cfg.OIDCAuth.DiscoveryURL) == "" &&
 			(strings.TrimSpace(cfg.OIDCAuth.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.OIDCAuth.TokenEndpoint) == "") {
 			errs = append(errs, "oidc_auth.discovery_url or both oidc_auth.authorization_endpoint and oidc_auth.token_endpoint are required when OIDC is enabled")
+		}
+	}
+
+	if cfg.WeComAuth != nil && cfg.WeComAuth.Enable {
+		if strings.TrimSpace(cfg.WeComAuth.CorpID) == "" {
+			errs = append(errs, "wecom_auth.corp_id is required when WeCom login is enabled")
+		}
+		if strings.TrimSpace(cfg.WeComAuth.AgentSecret) == "" {
+			errs = append(errs, "wecom_auth.agent_secret is required when WeCom login is enabled")
+		}
+		if cfg.WeComAuth.AgentID == 0 {
+			errs = append(errs, "wecom_auth.agent_id is required when WeCom login is enabled")
 		}
 	}
 
@@ -802,6 +851,49 @@ func applyOIDCEnvOverrides(cfg *Config) {
 	}
 	if cfg.OIDCAuth.DiscoveryURL == "" && cfg.OIDCAuth.IssuerURL != "" {
 		cfg.OIDCAuth.DiscoveryURL = strings.TrimRight(cfg.OIDCAuth.IssuerURL, "/") + "/.well-known/openid-configuration"
+	}
+}
+
+// applyWeComAuthEnvOverrides layers WECOM_AUTH_* environment variables over the
+// YAML section. Secrets belong here (or in .env), not in config.yaml, which is
+// tracked by git.
+func applyWeComAuthEnvOverrides(cfg *Config) {
+	if cfg.WeComAuth == nil {
+		cfg.WeComAuth = &WeComAuthConfig{}
+	}
+	if value := strings.TrimSpace(os.Getenv("WECOM_AUTH_ENABLE")); value != "" {
+		cfg.WeComAuth.Enable = strings.EqualFold(value, "true")
+	}
+	if value := strings.TrimSpace(os.Getenv("WECOM_AUTH_CORP_ID")); value != "" {
+		cfg.WeComAuth.CorpID = value
+	}
+	if value := strings.TrimSpace(os.Getenv("WECOM_AUTH_AGENT_ID")); value != "" {
+		if id, err := strconv.Atoi(value); err == nil {
+			cfg.WeComAuth.AgentID = id
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WECOM_AUTH_AGENT_SECRET")); value != "" {
+		cfg.WeComAuth.AgentSecret = value
+	}
+	if value := strings.TrimSpace(os.Getenv("WECOM_AUTH_REDIRECT_URI")); value != "" {
+		cfg.WeComAuth.RedirectURI = value
+	}
+	if value := strings.TrimSpace(os.Getenv("WECOM_AUTH_AUTO_PROVISION")); value != "" {
+		cfg.WeComAuth.AutoProvision = strings.EqualFold(value, "true")
+	}
+	if value := strings.TrimSpace(os.Getenv("WECOM_AUTH_JOIN_TENANT_ID")); value != "" {
+		if id, err := strconv.ParseUint(value, 10, 64); err == nil {
+			cfg.WeComAuth.JoinTenantID = id
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WECOM_AUTH_DEFAULT_ROLE")); value != "" {
+		cfg.WeComAuth.DefaultRole = strings.ToLower(value)
+	}
+	if value := strings.TrimSpace(os.Getenv("WECOM_AUTH_DISPLAY_NAME")); value != "" {
+		cfg.WeComAuth.DisplayName = value
+	}
+	if cfg.WeComAuth.DisplayName == "" {
+		cfg.WeComAuth.DisplayName = "企业微信"
 	}
 }
 

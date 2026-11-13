@@ -6191,6 +6191,9 @@ export default {
   auth: {
     login: 'Вход',
     logout: 'Выход',
+    wecomProvider: 'WeCom',
+    wecomLoginWithProvider: 'Войти через {provider}',
+    redirectingToWeCom: 'Перенаправление в WeCom...',
     oidcLogin: 'Войти через OIDC',
     oidcLoginWithProvider: 'Войти через {provider}',
     redirectingToOIDC: 'Перенаправление к поставщику удостоверений...',

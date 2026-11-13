@@ -2941,6 +2941,9 @@ export default {
   auth: {
     login: 'Login',
     logout: 'Logout',
+    wecomProvider: 'WeCom',
+    wecomLoginWithProvider: 'Sign in with {provider}',
+    redirectingToWeCom: 'Redirecting to WeCom...',
     oidcLogin: 'Sign in with OIDC',
     oidcLoginWithProvider: 'Sign in with {provider}',
     redirectingToOIDC: 'Redirecting to identity provider...',

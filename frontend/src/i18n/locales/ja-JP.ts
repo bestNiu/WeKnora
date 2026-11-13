@@ -2940,6 +2940,9 @@ export default {
   auth: {
     login: 'ログイン',
     logout: 'ログアウト',
+    wecomProvider: 'WeCom',
+    wecomLoginWithProvider: '{provider} でログイン',
+    redirectingToWeCom: 'WeCom にリダイレクトしています...',
     oidcLogin: 'OIDCでログイン',
     oidcLoginWithProvider: '{provider}でログイン',
     redirectingToOIDC: 'IDプロバイダにリダイレクトしています...',

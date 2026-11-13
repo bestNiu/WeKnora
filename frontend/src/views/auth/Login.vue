@@ -208,13 +208,19 @@
                 </t-button>
               </div>
 
-              <div v-if="oidcEnabled" class="oidc-divider">
+              <div v-if="oidcEnabled || wecomEnabled" class="oidc-divider">
                 <span>{{ $t('auth.orContinueWith') }}</span>
               </div>
 
               <t-button v-if="oidcEnabled" theme="default" size="large" block :loading="oidcLoading" :disabled="loading"
                 class="oidc-button" @click="handleOIDCLogin">
                 {{ oidcLoading ? $t('auth.redirectingToOIDC') : oidcLoginText }}
+              </t-button>
+
+              <!-- 企业微信：内置浏览器里会自动静默登录，这个按钮只在普通浏览器里出现 -->
+              <t-button v-if="wecomEnabled && (!isWeComBrowser || wecomSilentFailed)" theme="default" size="large" block
+                :loading="wecomLoading" :disabled="loading" class="oidc-button" @click="handleWeComLogin">
+                {{ wecomLoading ? $t('auth.redirectingToWeCom') : wecomLoginText }}
               </t-button>
             </t-form>
 
@@ -337,6 +343,7 @@ import {
   register,
   getOIDCAuthorizationURL,
   getOIDCConfig,
+  getWeComConfig,
   autoSetup,
   getAuthConfig,
   userInfoFromApi,
@@ -398,6 +405,32 @@ const isRegisterMode = ref(false)
 const showLanguageMenu = ref(false)
 const oidcEnabled = ref(false)
 const oidcProviderName = ref('')
+// 企业微信自建应用网页免登。内置浏览器（UA 含 wxwork）里不渲染按钮，
+// 而是直接静默走一次授权，用户看到的就是"点开就进来了"。
+const wecomEnabled = ref(false)
+const wecomLoading = ref(false)
+const wecomDisplayName = ref('')
+// 静默免登每个会话只尝试一次。失败后回到登录页时不再自动跳转，
+// 否则 UA 判定会立刻把用户送回授权页，形成死循环（日志里曾连续 6 次）。
+const WECOM_SILENT_KEY = 'weknora_wecom_silent_attempted'
+const wecomSilentAttempted = ref(readSilentFlag())
+const wecomSilentFailed = ref(false)
+
+function readSilentFlag(): boolean {
+  try {
+    return sessionStorage.getItem(WECOM_SILENT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+function writeSilentFlag(attempted: boolean) {
+  try {
+    if (attempted) sessionStorage.setItem(WECOM_SILENT_KEY, '1')
+    else sessionStorage.removeItem(WECOM_SILENT_KEY)
+  } catch {
+    // 隐私模式禁用 storage 时退化为「不自动跳转」
+  }
+}
 // Wait for configuration before showing a registration entry.
 const registrationMode = ref('')
 const registrationEnabled = computed(() => canRegister(registrationMode.value, !!inviteLookup.value))
@@ -430,6 +463,12 @@ const oidcLoginText = computed(() => {
   }
   return t('auth.oidcLogin')
 })
+const wecomLoginText = computed(() =>
+  t('auth.wecomLoginWithProvider', { provider: wecomDisplayName.value || t('auth.wecomProvider') })
+)
+const isWeComBrowser = computed(() =>
+  typeof navigator !== 'undefined' && /wxwork/i.test(navigator.userAgent)
+)
 const currentLangOption = computed(() => languageOptions.find(l => l.value === currentLanguage.value))
 
 // Login form data
@@ -591,6 +630,48 @@ const loadOIDCConfig = async () => {
     oidcEnabled.value = false
     oidcProviderName.value = ''
   }
+}
+
+const loadWeComConfig = async () => {
+  try {
+    const response = await getWeComConfig()
+    wecomEnabled.value = !!response.success && !!response.enabled
+    wecomDisplayName.value = response.display_name || ''
+  } catch {
+    wecomEnabled.value = false
+    wecomDisplayName.value = ''
+  }
+}
+
+const wecomAuthorizeURL = () =>
+  `/api/v1/auth/wecom/authorize?redirect=${encodeURIComponent('/')}`
+
+// 整页跳转：后端 302 到企微授权页，回调后带 #oidc_result 回来由 App.vue 兑换。
+const redirectToWeCom = () => {
+  wecomLoading.value = true
+  window.location.href = wecomAuthorizeURL()
+}
+
+// 手动点击：清掉「已尝试」标记，允许再走一次并重新开始静默策略。
+const handleWeComLogin = () => {
+  writeSilentFlag(false)
+  redirectToWeCom()
+}
+
+// 静默免登只在内置浏览器里做，且必须没有待处理的回调 hash，
+// 否则会与 App.vue 的结果兑换互相打断。
+const maybeSilentWeComLogin = () => {
+  if (!wecomEnabled.value || !isWeComBrowser.value) return
+  const hash = window.location.hash || ''
+  if (hash.includes('oidc_result=') || hash.includes('oidc_error=')) return
+  if (authStore.isLoggedIn) return
+  if (wecomSilentAttempted.value) {
+    // 本会话已经试过静默授权（通常是回调带了错误），这次只显示按钮。
+    wecomSilentFailed.value = true
+    return
+  }
+  writeSilentFlag(true)
+  redirectToWeCom()
 }
 
 // Registration stays hidden if configuration cannot be loaded.
@@ -805,6 +886,7 @@ onMounted(async () => {
   }
 
   loadOIDCConfig()
+  loadWeComConfig().then(() => maybeSilentWeComLogin())
   loadAuthConfig()
 })
 </script>

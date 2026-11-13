@@ -6192,6 +6192,9 @@ export default {
   auth: {
     login: '登入',
     logout: '退出',
+    wecomProvider: '企業微信',
+    wecomLoginWithProvider: '使用{provider}登入',
+    redirectingToWeCom: '正在跳轉到企業微信...',
     oidcLogin: '使用 OIDC 登入',
     oidcLoginWithProvider: '使用 {provider} 登入',
     redirectingToOIDC: '正在跳轉到身份提供商...',

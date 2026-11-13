@@ -51,6 +51,11 @@ var noAuthAPI = map[string][]string{
 	"/api/v1/auth/oidc/url":           {"GET"},
 	"/api/v1/auth/oidc/start":         {"GET"},
 	"/api/v1/auth/oidc/callback":      {"GET"},
+	// 企业微信免登：浏览器带着企微返回的 code/state 回到这里，没有
+	// WeKnora bearer token，鉴权靠 state 的 HMAC 签名 + nonce cookie。
+	"/api/v1/auth/wecom/config":    {"GET"},
+	"/api/v1/auth/wecom/authorize": {"GET"},
+	"/api/v1/auth/wecom/callback":  {"GET"},
 	// MCP OAuth provider redirect: the third-party authorization server
 	// redirects the browser here without a WeKnora bearer token. The request
 	// is authenticated by the opaque, single-use `state` parameter instead.

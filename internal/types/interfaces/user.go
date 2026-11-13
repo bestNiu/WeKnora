@@ -18,6 +18,17 @@ type UserService interface {
 	// provisioning is the default tenant mode for a newly auto-created user
 	// (resolved by the caller from auth.default_tenant_mode).
 	LoginWithOIDC(ctx context.Context, code, redirectURI string, provisioning types.TenantProvisioningMode) (*types.OIDCCallbackResponse, error)
+	// LoginWithWeCom completes a WeCom web login for an already-resolved member
+	// userid. The response reuses OIDCCallbackResponse so the existing callback
+	// encoding and frontend handling need no second shape. opts.AutoProvision
+	// false turns an unbound member into a clear "ask an admin" result instead
+	// of a new account.
+	LoginWithWeCom(ctx context.Context, userid string,
+		opts types.WeComLoginOptions) (*types.OIDCCallbackResponse, error)
+	// BindUserIdentity links an external identity (provider + subject) to an
+	// existing local account. Used to attach WeCom member userids to accounts
+	// that already own sessions and knowledge bases.
+	BindUserIdentity(ctx context.Context, userID, provider, subject string) error
 	// GetUserByID gets a user by ID
 	GetUserByID(ctx context.Context, id string) (*types.User, error)
 	// GetUsersByIDs batch-fetches users by id, returning a map keyed by

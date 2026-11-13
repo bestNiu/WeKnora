@@ -258,6 +258,26 @@ export async function getOIDCConfig(): Promise<OIDCConfigResponse> {
 }
 
 /**
+ * 获取企业微信登录配置（是否启用 + 按钮文案）。
+ *
+ * 企微网页授权不是 OIDC：后端 /auth/wecom/authorize 直接 302 到
+ * open.weixin.qq.com，回调后仍以 #oidc_result/#oidc_error 回传，
+ * 因此这里只需要一个开关。
+ */
+export async function getWeComConfig(): Promise<{ success: boolean; enabled: boolean; display_name?: string }> {
+  try {
+    const response = await get('/api/v1/auth/wecom/config')
+    // SAFETY: the axios interceptor returns the decoded response body, so the
+    // runtime shape is exactly what /auth/wecom/config serialises
+    // (types.WeComConfigResponse). A proxy or 5xx body would fail the caller's
+    // `!!response.success` check rather than crash.
+    return response as unknown as { success: boolean; enabled: boolean; display_name?: string }
+  } catch {
+    return { success: false, enabled: false }
+  }
+}
+
+/**
  * 获取认证配置（仅返回前端渲染需要的公开字段，例如注册模式）。
  *
  * 后端通过 `auth.registration_mode` 控制是否允许自助注册：

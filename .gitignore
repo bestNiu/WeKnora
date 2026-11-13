@@ -63,3 +63,6 @@ miniprogram/project.private.config.json
 
 # Locally built BrowserSkill runtime and extension bundles
 /artifacts/browserskill/
+wecom-mapping.csv
+wecom-roster.csv
+roster-import.sql

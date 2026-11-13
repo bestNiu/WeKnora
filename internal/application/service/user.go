@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -561,6 +562,269 @@ func (s *userService) LoginWithOIDC(
 		RefreshToken: refreshToken,
 		IsNewUser:    isNewUser,
 	}, nil
+}
+
+// LoginWithWeCom completes a WeCom (企业微信) web login for an already-resolved
+// member userid. WeCom web authorization is not OpenID Connect, so the code →
+// userid exchange lives in the WeCom auth handler; this method owns the local
+// half only: identity lookup, optional provisioning, and token issuance.
+//
+// The response reuses OIDCCallbackResponse deliberately: the callback payload
+// encoder and the frontend handler then stay single-implementation.
+func (s *userService) LoginWithWeCom(
+	ctx context.Context,
+	userid string,
+	opts types.WeComLoginOptions,
+) (*types.OIDCCallbackResponse, error) {
+	userid = strings.TrimSpace(userid)
+	if userid == "" {
+		return nil, errors.New("WeCom userid is required")
+	}
+
+	user, isNewUser, err := s.resolveWeComUser(ctx, userid, opts)
+	if err != nil {
+		if errors.Is(err, ErrWeComIdentityUnbound) {
+			// Echo the member account so the user can hand it to an admin
+			// without anyone reading server logs.
+			return &types.OIDCCallbackResponse{
+				Success: false,
+				Message: fmt.Sprintf("该企业微信账号（%s）尚未绑定本系统账号，请联系管理员开通。",
+					secutils.SanitizeForLog(userid)),
+			}, nil
+		}
+		return nil, err
+	}
+
+	if user == nil {
+		return nil, errors.New("WeCom login resolved no user")
+	}
+	if !user.IsActive {
+		return &types.OIDCCallbackResponse{Success: false, Message: "账号已被停用"}, nil
+	}
+
+	// Same tenant resolution and membership projection as the OIDC flow so the
+	// frontend gets one response shape for every SSO method.
+	resolvedTenantID := s.resolveLoginTenantID(ctx, user)
+	accessToken, refreshToken, err := s.generateTokensForTenant(ctx, user, resolvedTenantID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate local tokens: %w", err)
+	}
+
+	var tenant *types.Tenant
+	if resolvedTenantID > 0 {
+		if t, terr := s.tenantService.GetTenantByID(ctx, resolvedTenantID); terr == nil {
+			tenant = t
+		} else {
+			logger.Warnf(ctx, "WeCom login: failed to load tenant %d for user %s: %v",
+				resolvedTenantID, user.ID, terr)
+		}
+	}
+
+	return &types.OIDCCallbackResponse{
+		Success:      true,
+		Message:      "登录成功",
+		User:         user,
+		Tenant:       tenant,
+		Memberships:  s.buildMembershipsForUser(ctx, user, tenant),
+		Token:        accessToken,
+		RefreshToken: refreshToken,
+		IsNewUser:    isNewUser,
+	}, nil
+}
+
+// ErrWeComIdentityUnbound reports a member with no local binding while
+// auto-provisioning is off. LoginWithWeCom turns it into a user-facing message.
+var ErrWeComIdentityUnbound = errors.New("wecom identity is not bound to any local account")
+
+// resolveWeComUser decides which local account a WeCom member maps to:
+//
+//  1. an existing binding — the steady state;
+//  2. a local account whose email matches the corporate-directory mailbox —
+//     merges the member into the account they already own (sessions, knowledge
+//     bases, role) with no admin action;
+//  3. a fresh account when auto-provisioning is on;
+//  4. otherwise ErrWeComIdentityUnbound.
+func (s *userService) resolveWeComUser(
+	ctx context.Context,
+	userid string,
+	opts types.WeComLoginOptions,
+) (*types.User, bool, error) {
+	identities, err := s.identities()
+	if err != nil {
+		return nil, false, err
+	}
+
+	identity, err := identities.GetUserIdentity(ctx, types.IdentityProviderWeCom, userid)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to query WeCom identity: %w", err)
+	}
+	if identity != nil {
+		user, err := s.userRepo.GetUserByID(ctx, identity.UserID)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to load user %s for WeCom identity: %w", identity.UserID, err)
+		}
+		return user, false, nil
+	}
+
+	// The mailbox comes from the corporate directory over a server-to-server
+	// call, not from the client, so a caller cannot spoof it to hijack an
+	// account.
+	if email := strings.TrimSpace(opts.Email); email != "" {
+		existing, lookupErr := s.userRepo.GetUserByEmail(ctx, email)
+		if lookupErr != nil && !isUserLookupNotFound(lookupErr) {
+			return nil, false, fmt.Errorf("failed to query user by email: %w", lookupErr)
+		}
+		if existing != nil {
+			if bindErr := s.bindIdentity(ctx, existing.ID, types.IdentityProviderWeCom, userid); bindErr != nil {
+				return nil, false, bindErr
+			}
+			logger.Infof(ctx, "WeCom login: bound userid=%s to existing account %s by directory email",
+				secutils.SanitizeForLog(userid), existing.ID)
+			return existing, false, nil
+		}
+	}
+
+	if !opts.AutoProvision {
+		return nil, false, ErrWeComIdentityUnbound
+	}
+
+	user, err := s.provisionWeComUser(ctx, userid, opts)
+	if err != nil {
+		return nil, false, err
+	}
+	return user, true, nil
+}
+
+// provisionWeComUser creates a local account plus its WeCom binding. The
+// synthetic email never receives mail; it exists because users.email is NOT
+// NULL UNIQUE. Members with a real mailbox should be bound to an existing
+// account by an admin instead (see BindUserIdentity).
+func (s *userService) provisionWeComUser(
+	ctx context.Context,
+	userid string,
+	opts types.WeComLoginOptions,
+) (*types.User, error) {
+	// A join tenant is the difference between "an empty private workspace" and
+	// "the workspace whose knowledge bases the team shares". With one, the new
+	// account is created tenantless and then added as a member of that
+	// workspace, so the very first login already lands where the rest of the
+	// team is.
+	provisioning := opts.Provisioning
+	joinTenantID := opts.JoinTenantID
+	if joinTenantID > 0 {
+		provisioning = types.TenantProvisioningTenantless
+	}
+	// Prefer the corporate-directory name; fall back to the member account.
+	// Display names may be Chinese, so they go through sanitizeDisplayName
+	// rather than the ASCII slug sanitizer used for OIDC usernames.
+	displayName := sanitizeDisplayName(opts.DisplayName)
+	if displayName == "" {
+		displayName = "wecom-" + sanitizeUsernameCandidate(userid)
+	}
+	if displayName == "" {
+		displayName = "wecom-user"
+	}
+	// The synthetic mailbox exists only because users.email is NOT NULL UNIQUE.
+	email := strings.TrimSpace(opts.Email)
+	if email == "" {
+		email = sanitizeUsernameCandidate(userid) + "@wecom.invalid"
+	}
+	username := s.uniqueUsername(ctx, displayName)
+	randomPassword, err := generateRandomString(32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate password for WeCom user: %w", err)
+	}
+
+	user, err := s.Register(ctx, &types.RegisterRequest{
+		Username:           username,
+		Email:              email,
+		Password:           randomPassword,
+		TenantProvisioning: provisioning,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to auto-provision WeCom user: %w", err)
+	}
+
+	if err := s.bindIdentity(ctx, user.ID, types.IdentityProviderWeCom, userid); err != nil {
+		return nil, err
+	}
+
+	if joinTenantID > 0 {
+		role := opts.Role
+		if !role.IsValid() {
+			role = types.TenantRoleViewer
+		}
+		if s.memberService == nil {
+			return nil, errors.New("tenant membership service unavailable; cannot join workspace")
+		}
+		if _, err := s.memberService.AddMember(ctx, user.ID, joinTenantID, role, nil); err != nil {
+			return nil, fmt.Errorf("failed to join workspace %d: %w", joinTenantID, err)
+		}
+		// Home tenant = join tenant so subsequent logins resolve here without
+		// walking the membership list.
+		user.TenantID = joinTenantID
+		user.UpdatedAt = time.Now()
+		if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+			logger.Warnf(ctx, "WeCom login: failed to set home tenant for %s: %v", user.ID, err)
+		}
+	}
+
+	// No password was ever handed to the user; mark the account SSO-only for
+	// the same reason the OIDC provisioning path does.
+	ssoOnly := true
+	user.Preferences.OidcOnlyLogin = &ssoOnly
+	user.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		logger.Warnf(ctx, "WeCom login: failed to mark SSO-only preference for %s: %v", user.ID, err)
+	}
+	return user, nil
+}
+
+// bindIdentity links provider+subject to a local user, treating an existing
+// identical binding as success so retries are idempotent.
+func (s *userService) bindIdentity(ctx context.Context, userID, provider, subject string) error {
+	identities, err := s.identities()
+	if err != nil {
+		return err
+	}
+	identity := &types.UserIdentity{UserID: userID, Provider: provider, Subject: subject}
+	err = identities.CreateUserIdentity(ctx, identity)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, apprepo.ErrIdentityAlreadyBound) {
+		existing, lookupErr := identities.GetUserIdentity(ctx, provider, subject)
+		if lookupErr == nil && existing != nil && existing.UserID == userID {
+			return nil
+		}
+		return fmt.Errorf("WeCom identity %q is already bound to another account", subject)
+	}
+	return fmt.Errorf("failed to bind WeCom identity: %w", err)
+}
+
+// BindUserIdentity links an external identity to an existing account. It backs
+// the manual binding path (P3): members whose WeCom userid must be attached to
+// an account that already owns sessions and knowledge bases.
+func (s *userService) BindUserIdentity(ctx context.Context, userID, provider, subject string) error {
+	if strings.TrimSpace(userID) == "" {
+		return errors.New("user id is required")
+	}
+	if strings.TrimSpace(subject) == "" {
+		return errors.New("subject is required")
+	}
+	if _, err := s.userRepo.GetUserByID(ctx, userID); err != nil {
+		return fmt.Errorf("failed to load user %s: %w", userID, err)
+	}
+	return s.bindIdentity(ctx, userID, provider, subject)
+}
+
+// identities returns the identity store backed by the user repository.
+func (s *userService) identities() (apprepo.IdentityStore, error) {
+	store, ok := s.userRepo.(apprepo.IdentityStore)
+	if !ok || store == nil {
+		return nil, errors.New("identity store is unavailable on this repository")
+	}
+	return store, nil
 }
 
 // GetUserByID gets a user by ID
@@ -1880,7 +2144,12 @@ func (s *userService) generateOIDCUsername(ctx context.Context, info *types.OIDC
 	if base == "" {
 		base = "oidc-user"
 	}
+	return s.uniqueUsername(ctx, base)
+}
 
+// uniqueUsername appends -2, -3 … until the candidate is free. Split out of
+// generateOIDCUsername so an already-sanitized display name can reuse it.
+func (s *userService) uniqueUsername(ctx context.Context, base string) string {
 	candidate := base
 	for i := 0; i < 20; i++ {
 		existing, err := s.userRepo.GetUserByUsername(ctx, candidate)
@@ -2190,6 +2459,37 @@ func sanitizeUsernameCandidate(value string) string {
 	result := strings.Trim(b.String(), "-._")
 	if len(result) > 50 {
 		result = strings.Trim(result[:50], "-._")
+	}
+	return result
+}
+
+// sanitizeDisplayName keeps human-readable names usable as usernames: letters
+// from any script (Chinese included), digits, space-collapsed separators. It is
+// deliberately NOT the ASCII slug used for OIDC handles, which exists to build
+// machine-ish usernames from emails.
+func sanitizeDisplayName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	space := false
+	for _, r := range value {
+		switch {
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			if !space && b.Len() > 0 {
+				b.WriteByte(' ')
+				space = true
+			}
+		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '.' || r == '-' || r == '·':
+			b.WriteRune(r)
+			space = false
+		}
+	}
+	result := strings.TrimSpace(b.String())
+	runes := []rune(result)
+	if len(runes) > 50 {
+		result = strings.TrimSpace(string(runes[:50]))
 	}
 	return result
 }

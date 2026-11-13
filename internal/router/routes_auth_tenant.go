@@ -229,6 +229,11 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 	r.GET("/auth/oidc/callback", handler.OIDCRedirectCallback)
 	// /auth/oidc/start：直连 302 跳转到 OIDC 提供方，供前端无法走 JS 拉取 URL 的场景直接发起登录
 	r.GET("/auth/oidc/start", handler.OIDCStart)
+	// 企业微信自建应用网页免登。企微网页授权不是 OIDC（code 换的是成员
+	// userid），所以走独立适配器；authorize 直接 302，前端不需要 JS 介入。
+	r.GET("/auth/wecom/config", handler.GetWeComConfig)
+	r.GET("/auth/wecom/authorize", handler.WeComAuthorize)
+	r.GET("/auth/wecom/callback", handler.WeComCallback)
 	r.POST("/auth/refresh", handler.RefreshToken)
 	r.GET("/auth/validate", handler.ValidateToken)
 	r.POST("/auth/logout", handler.Logout)
@@ -309,6 +314,8 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.POST("/users/status", handler.SetUserStatus)
 		adminRoutes.POST("/users/reset-password", handler.ResetUserPassword)
 		adminRoutes.POST("/users/create", handler.CreateSystemUser)
+		// 外部身份绑定（企业微信 userid → 本地账号）。批量导入花名册用。
+		adminRoutes.POST("/user-identities/bind", handler.BindUserIdentities)
 		adminRoutes.GET("/api-keys", handler.ListPlatformAPIKeys)
 		adminRoutes.POST("/api-keys", handler.CreatePlatformAPIKey)
 		adminRoutes.DELETE("/api-keys/:key_id", handler.DeletePlatformAPIKey)

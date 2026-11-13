@@ -6191,6 +6191,9 @@ export default {
   auth: {
     login: '로그인',
     logout: '로그아웃',
+    wecomProvider: 'WeCom',
+    wecomLoginWithProvider: '{provider}(으)로 로그인',
+    redirectingToWeCom: 'WeCom으로 이동 중...',
     oidcLogin: 'OIDC로 로그인',
     oidcLoginWithProvider: '{provider}(으)로 로그인',
     redirectingToOIDC: 'ID 공급자로 이동하는 중...',
