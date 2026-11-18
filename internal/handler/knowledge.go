@@ -46,6 +46,9 @@ type KnowledgeHandler struct {
 	previewArtifacts interfaces.PreviewArtifactService
 	// fileService opens the stored preview PDF.
 	fileService interfaces.FileService
+	// accessStats enforces the per-member download quota and freeze. Nil keeps
+	// the guard inert (reduced wirings, tests).
+	accessStats interfaces.KBAccessStatsService
 }
 
 // backlogProbe tells a backlogged document (work still queued) from a stuck
@@ -104,6 +107,7 @@ func NewKnowledgeHandler(
 	housekeeping *service.HousekeepingService,
 	previewArtifacts interfaces.PreviewArtifactService,
 	fileService interfaces.FileService,
+	accessStats interfaces.KBAccessStatsService,
 ) *KnowledgeHandler {
 	var backlog backlogProbe
 	if housekeeping != nil {
@@ -123,7 +127,34 @@ func NewKnowledgeHandler(
 		spanRepo:          spanRepo,
 		previewArtifacts:  previewArtifacts,
 		fileService:       fileService,
+		accessStats:       accessStats,
 	}
+}
+
+// RecordKnowledgeView counts one document preview against its knowledge base.
+//
+// POST /knowledge/:id/view
+//
+// The client only knows the document id, so the KB is resolved here. Telemetry
+// is best-effort: a stats outage must never fail a preview.
+func (h *KnowledgeHandler) RecordKnowledgeView(c *gin.Context) {
+	ctx := c.Request.Context()
+	caller := types.CallerFromContext(ctx)
+	if caller.TenantID == 0 || caller.UserID == "" || h.accessStats == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true})
+		return
+	}
+	tenantID := caller.TenantID
+	item, err := h.kgService.GetKnowledgeByID(ctx, c.Param("id"))
+	if err != nil || item == nil {
+		// Unknown or out-of-scope document: nothing to count, no error either.
+		c.JSON(http.StatusOK, gin.H{"success": true})
+		return
+	}
+	if err := h.accessStats.RecordView(ctx, tenantID, item.KnowledgeBaseID, caller.UserID, item.ID); err != nil {
+		logger.Warnf(ctx, "record knowledge view failed for %s: %v", item.ID, err)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // requireKBOwnershipOrAdmin enforces the same "KB creator OR Admin+" matrix

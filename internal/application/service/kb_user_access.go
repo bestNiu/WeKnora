@@ -61,6 +61,23 @@ func (s *kbUserAccessService) ReplaceForKB(
 	return s.repo.ReplaceForKB(ctx, tenantID, kbID, grantedBy, grants)
 }
 
+// UpsertForKB applies only the listed grants, so a paged member panel never
+// revokes the members it did not display.
+func (s *kbUserAccessService) UpsertForKB(
+	ctx context.Context, tenantID uint64, kbID, grantedBy string, grants []types.KBUserGrant,
+) error {
+	if s == nil || s.repo == nil {
+		return errors.New("kb user access service is unavailable")
+	}
+	if tenantID == 0 {
+		return errors.New("kb user access: tenant id is required")
+	}
+	if strings.TrimSpace(kbID) == "" {
+		return errors.New("kb user access: knowledge base id is required")
+	}
+	return s.repo.UpsertForKB(ctx, tenantID, kbID, grantedBy, grants)
+}
+
 // DeleteByKB drops every grant for a KB.
 func (s *kbUserAccessService) DeleteByKB(
 	ctx context.Context, tenantID uint64, kbID string,

@@ -49,6 +49,33 @@ func (f *fakeKBUserAccessRepo) GetByUserAndKBs(
 	return out, nil
 }
 
+// UpsertForKB applies only the listed grants, mirroring the real repository's
+// incremental semantics (a revoke deletes the row, everything else upserts).
+func (f *fakeKBUserAccessRepo) UpsertForKB(
+	_ context.Context, tenantID uint64, kbID, grantedBy string, grants []types.KBUserGrant,
+) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.rows[kbID] == nil {
+		f.rows[kbID] = map[string]*types.KBUserAccess{}
+	}
+	for _, grant := range grants {
+		if grant.CanDownload {
+			grant.CanView = true
+		}
+		if !grant.CanView && !grant.CanDownload {
+			delete(f.rows[kbID], grant.UserID)
+			continue
+		}
+		f.rows[kbID][grant.UserID] = &types.KBUserAccess{
+			TenantID: tenantID, KnowledgeBaseID: kbID, UserID: grant.UserID,
+			CanView: grant.CanView, CanDownload: grant.CanDownload, GrantedBy: grantedBy,
+		}
+	}
+	return nil
+}
+
 func (f *fakeKBUserAccessRepo) ReplaceForKB(_ context.Context, tenantID uint64, kbID, grantedBy string, grants []types.KBUserGrant) error {
 	if f.err != nil {
 		return f.err

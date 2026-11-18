@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
 import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
+import { recordKnowledgeView } from '@/api/knowledge-base/index';
 import { downKnowledgeDetails, getKnowledgePreviewMeta, previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
@@ -239,7 +240,18 @@ watch(() => props.active, (active) => {
   if (!active) void exitPreviewFullscreen();
 });
 
+// 预览即计一次查看：每次挂载（打开一次预览）上报一次，失败静默。
+// 放在挂载而不是 watch(active) 里，避免同一预览反复切换 tab 刷高计数。
+function reportViewOnce() {
+  const knowledgeId = props.knowledgeId;
+  if (!knowledgeId) return;
+  void recordKnowledgeView(knowledgeId).catch(() => {
+    // 埋点失败不影响预览本身。
+  });
+}
+
 onMounted(() => {
+  reportViewOnce();
   document.addEventListener('fullscreenchange', syncFullscreen);
   window.addEventListener('keydown', onFullscreenEscape, true);
   // @vue-office/pptx renders the shape tree itself and does not route every

@@ -135,6 +135,8 @@ func RegisterKnowledgeRoutes(
 		// (k.DELETE("/:id"), k.POST("/:id/reparse"), k.PUT("/:id")).
 		kRead.GET("/batch", g.Viewer(), handler.GetKnowledgeBatch)
 		kRead.GET("/:id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledge)
+		// 预览计数（预览即计一次）：读权限即可，不改变任何业务状态。
+		kRead.POST("/:id/view", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.RecordKnowledgeView)
 		kRead.GET("/:id/stages", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
 		kRead.GET("/:id/spans", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
 		k.DELETE("/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DeleteKnowledge)
@@ -255,8 +257,17 @@ func RegisterKnowledgeBaseRoutes(
 		if accessHandler != nil {
 			kbManagement.GET("/:id/access", g.OwnedKBOrAdmin(), accessHandler.GetKBAccess)
 			kbManagement.PUT("/:id/access", g.OwnedKBOrAdmin(), accessHandler.PutKBAccess)
+			// 增量授权：成员面板分页后，整表替换会把当前页以外的人全部撤销。
+			kbManagement.PATCH("/:id/access", g.OwnedKBOrAdmin(), accessHandler.PatchKBAccess)
 			// 批量授权：跨多个知识库，故要求 Admin+（单库的创建者规则无法套用）。
 			kbManagement.POST("/access/batch", g.Admin(), accessHandler.PutKBBatchAccess)
+			// 预览计数：读权限即够，属于浏览行为而非管理动作。
+			kb.GET("/:id/access/view", g.Viewer(), g.KBAccessRead("id"), accessHandler.RecordKBView)
+			// 下载风控名单与解冻：能改授权的人才能看/解冻。
+			kbManagement.GET("/:id/access/tags", g.OwnedKBOrAdmin(), accessHandler.GetKBAccessTags)
+			kbManagement.POST("/:id/access/tags", g.OwnedKBOrAdmin(), accessHandler.PutKBAccessTags)
+			kbManagement.GET("/:id/access/risk", g.OwnedKBOrAdmin(), accessHandler.ListKBAccessRisk)
+			kbManagement.DELETE("/:id/access/risk/:user_id", g.OwnedKBOrAdmin(), accessHandler.ClearKBAccessRisk)
 		}
 		// 更新/删除知识库 — 两层正交鉴权，缺一不可：
 		//   OwnedKBOrAdmin  管「租户内」归属：非创建者的 Contributor 改不了

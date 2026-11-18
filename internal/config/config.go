@@ -26,6 +26,7 @@ type Config struct {
 	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
 	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
 	WeComAuth       *WeComAuthConfig       `yaml:"wecom_auth"       json:"wecom_auth"`
+	KBDownload      *KBDownloadLimitConfig `yaml:"kb_download"      json:"kb_download"`
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
 	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
@@ -407,6 +408,20 @@ func (c *WeComAuthConfig) Enabled() bool {
 		strings.TrimSpace(c.AgentSecret) != "" && c.AgentID != 0
 }
 
+// KBDownloadLimitConfig is the knowledge-base download risk policy. It is a
+// safety rail, not billing: the daily cap stops bulk exfiltration, the window
+// rule freezes a member who pulls files in a burst.
+type KBDownloadLimitConfig struct {
+	// DailyLimit caps successful download requests per member per day.
+	DailyLimit int `yaml:"daily_limit" json:"daily_limit"`
+	// WindowMinutes + WindowLimit freeze downloads when a member exceeds
+	// WindowLimit requests inside WindowMinutes.
+	WindowMinutes int `yaml:"window_minutes" json:"window_minutes"`
+	WindowLimit   int `yaml:"window_limit"   json:"window_limit"`
+	// SuspendHours is how long the freeze lasts.
+	SuspendHours int `yaml:"suspend_hours" json:"suspend_hours"`
+}
+
 // PromptTemplateI18n holds localized name and description for a prompt template.
 type PromptTemplateI18n struct {
 	Name        string `yaml:"name"        json:"name"`
@@ -668,6 +683,7 @@ func LoadConfig() (*Config, error) {
 	// Validate configuration values
 	applyOIDCEnvOverrides(&cfg)
 	applyWeComAuthEnvOverrides(&cfg)
+	applyKBDownloadEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyNetworkEnvOverrides()
@@ -894,6 +910,34 @@ func applyWeComAuthEnvOverrides(cfg *Config) {
 	}
 	if cfg.WeComAuth.DisplayName == "" {
 		cfg.WeComAuth.DisplayName = "企业微信"
+	}
+}
+
+// applyKBDownloadEnvOverrides reads the download guard knobs. Defaults live in
+// the service; an operator only sets the env var that differs.
+func applyKBDownloadEnvOverrides(cfg *Config) {
+	if cfg.KBDownload == nil {
+		cfg.KBDownload = &KBDownloadLimitConfig{}
+	}
+	if value := strings.TrimSpace(os.Getenv("KB_DOWNLOAD_DAILY_LIMIT")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.KBDownload.DailyLimit = n
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("KB_DOWNLOAD_WINDOW_MINUTES")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.KBDownload.WindowMinutes = n
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("KB_DOWNLOAD_WINDOW_LIMIT")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.KBDownload.WindowLimit = n
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("KB_DOWNLOAD_SUSPEND_HOURS")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.KBDownload.SuspendHours = n
+		}
 	}
 }
 

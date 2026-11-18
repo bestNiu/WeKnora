@@ -107,6 +107,32 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 		}
 	}
 
+	// 下载风控：每日配额与异常冻结。放在权限校验之后、取文档之前，命中即拒绝，
+	// 不产生任何文件 IO。计数在「授权通过」这一刻发生，与传输成败解耦。
+	if h.accessStats != nil {
+		caller := types.CallerFromContext(c.Request.Context())
+		if caller.TenantID != 0 && caller.UserID != "" {
+			// 批量下载按文档数计费：200 个文件消耗 200 次额度。
+			decision, guardErr := h.accessStats.AuthorizeDownload(
+				c.Request.Context(), tenantID, kbID, caller.UserID, len(ids))
+			if guardErr != nil {
+				logger.Warnf(c.Request.Context(), "download guard failed for kb=%s user=%s: %v",
+					kbID, caller.UserID, guardErr)
+			} else if !decision.Allowed {
+				retryAfter := int(decision.RetryAfter.Seconds())
+				_ = c.Error(errors.NewTooManyRequestsError(decision.Message).
+					WithDetails(map[string]any{
+						"reason":             decision.Reason,
+						"downloads_today":    decision.DownloadsToday,
+						"daily_limit":        decision.DailyLimit,
+						"retry_after_seconds": retryAfter,
+						"risk_triggered":     decision.RiskTriggered,
+					}))
+				return
+			}
+		}
+	}
+
 	items, err := h.kgService.GetKnowledgeBatch(ctx, tenantID, ids)
 	if err != nil {
 		_ = c.Error(errors.NewInternalServerError("无法获取待下载文档，请稍后重试"))

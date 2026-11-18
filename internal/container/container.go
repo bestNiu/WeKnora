@@ -189,6 +189,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAgentPromptRepository))
 	must(container.Provide(repository.NewAgentGrantRepository))
 	must(container.Provide(repository.NewKBUserAccessRepository))
+	must(container.Provide(repository.NewKBAccessStatsRepository))
+	must(container.Provide(repository.NewKBMemberTagRepository))
 	must(container.Provide(repository.NewAgentAccessRepository))
 	must(container.Provide(repository.NewPreviewArtifactRepository))
 	must(container.Provide(repository.NewAgentRunSuspensionRepository))
@@ -271,6 +273,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewGraphSearchService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBUserAccessService))
+	must(container.Provide(service.NewKBAccessStatsService))
+	must(container.Provide(service.NewKBMemberTagService))
 	must(container.Provide(service.NewAgentAccessService))
 	must(
 		container.Provide(service.NewKBShareService),

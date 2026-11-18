@@ -17,6 +17,8 @@ type KBUserAccessRepository interface {
 	// GetByUserAndKBs returns the caller's live grants for the given KBs,
 	// keyed by knowledge base ID. Unknown IDs are simply absent.
 	GetByUserAndKBs(ctx context.Context, tenantID uint64, userID string, kbIDs []string) (map[string]*types.KBUserAccess, error)
+	// UpsertForKB applies only the listed grants, leaving other members alone.
+	UpsertForKB(ctx context.Context, tenantID uint64, kbID, grantedBy string, grants []types.KBUserGrant) error
 	// ReplaceForKB makes the stored grant set match grants exactly: missing
 	// users are soft-deleted, present users are created or revived. The
 	// operation is transactional and idempotent.
@@ -35,6 +37,9 @@ type KBUserAccessService interface {
 	Resolve(ctx context.Context, tenantID uint64, userID string, kbIDs []string) (map[string]*types.KBUserAccess, error)
 	// ListByKB lists one KB's grants for the admin UI.
 	ListByKB(ctx context.Context, tenantID uint64, kbID string) ([]*types.KBUserAccess, error)
+	// UpsertForKB applies only the listed grants (incremental). The member panel
+	// pages, so a full replace would revoke members outside the current page.
+	UpsertForKB(ctx context.Context, tenantID uint64, kbID, grantedBy string, grants []types.KBUserGrant) error
 	// ReplaceForKB applies the desired grant set.
 	ReplaceForKB(ctx context.Context, tenantID uint64, kbID, grantedBy string, grants []types.KBUserGrant) error
 	// DeleteByKB drops every grant for a KB (used when the KB is deleted).

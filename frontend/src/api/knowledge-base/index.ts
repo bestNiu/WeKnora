@@ -1,4 +1,4 @@
-import { get, post, put, del, postUpload, getDown } from "../../utils/request";
+import { get, post, put, patch, del, postUpload, getDown } from "../../utils/request";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/audit-log';
 import { buildListKnowledgeFilesQuery } from './knowledgeFileListQuery';
@@ -666,19 +666,97 @@ export function previewKnowledgeFile(id: string, fallbackOriginal = false) {
 
 export interface KBAccessMember {
   user_id: string
+  username?: string
+  email?: string
+  role?: string
   can_view: boolean
   can_download: boolean
+  /** 累计预览次数（预览即计一次）。 */
+  views_total?: number
+  downloads_total?: number
+  /** 当日已用下载次数，与 downloaded quota 对比可显示剩余额度。 */
+  downloads_today?: number
+  last_view_at?: string | null
+  last_download_at?: string | null
+  /** 风控：命中异常后由下载守卫写入。 */
+  risk_flag?: boolean
+  risk_reason?: string
+  download_suspended_until?: string | null
+  /** 管理员打的成员标签，用于筛选与分组。 */
+  tags?: string[]
 }
 
 export interface KBAccessPolicy {
   knowledge_base_id: string
   visibility_mode: 'tenant' | 'restricted'
   members: KBAccessMember[]
+  total?: number
+  page?: number
+  page_size?: number
   can_download?: boolean
 }
 
-export function getKnowledgeBaseAccess(id: string) {
-  return get(`/api/v1/knowledge-bases/${id}/access`)
+export interface KBAccessTagSummary {
+  tag: string
+  count: number
+}
+
+export interface KBAccessRiskMember {
+  user_id: string
+  username?: string
+  email?: string
+  views_total: number
+  downloads_total: number
+  downloads_today: number
+  last_download_at?: string | null
+  risk_flag: boolean
+  risk_reason?: string
+  download_suspended_until?: string | null
+}
+
+/**
+ * 成员与权限列表按工作区成员分页（而不是按已有授权分页），
+ * 因为"还没被授权的人"也必须出现在面板里才能授权。
+ */
+export function getKnowledgeBaseAccess(
+  id: string,
+  params?: { q?: string; page?: number; page_size?: number },
+) {
+  const u = new URLSearchParams()
+  if (params?.q) u.set('q', params.q)
+  if (params?.page) u.set('page', String(params.page))
+  if (params?.page_size) u.set('page_size', String(params.page_size))
+  const qs = u.toString()
+  return get(`/api/v1/knowledge-bases/${id}/access${qs ? `?${qs}` : ''}`)
+}
+
+/**
+ * 预览埋点：打开一次文档预览记一次查看。失败静默，不阻塞预览。
+ *
+ * 客户端只知道文档 id，知识库由服务端反查，避免预览组件再额外请求一次。
+ */
+export function recordKnowledgeView(knowledgeId: string) {
+  return post(`/api/v1/knowledge/${knowledgeId}/view`, {})
+}
+
+/** 该知识库已使用的标签（含使用人数），用于筛选与编辑建议。 */
+export function getKBAccessTags(id: string) {
+  return get(`/api/v1/knowledge-bases/${id}/access/tags`)
+}
+
+/** 覆盖某个成员的标签集合（手动标签，管理员动作）。 */
+export function putKBAccessTags(id: string, userId: string, tags: string[]) {
+  return post(`/api/v1/knowledge-bases/${id}/access/tags`, { user_id: userId, tags })
+}
+
+/** 下载风控名单：被标记异常 / 临时冻结的成员。 */
+export function getKBAccessRisk(id: string) {
+  return get(`/api/v1/knowledge-bases/${id}/access/risk`)
+}
+
+/** 解除某个成员的下载冻结（管理员动作，会写审计）。 */
+export function clearKBAccessRisk(id: string, userId: string) {
+  return del(`/api/v1/knowledge-bases/${id}/access/risk/${encodeURIComponent(userId)}`)
 }
 
 export function putKnowledgeBaseAccess(
@@ -686,6 +764,17 @@ export function putKnowledgeBaseAccess(
   data: { visibility_mode: string; members: KBAccessMember[] },
 ) {
   return put(`/api/v1/knowledge-bases/${id}/access`, data)
+}
+
+/**
+ * 增量更新成员授权：只提交被改动的成员，其它页的授权保持不变。
+ * 分页面板必须走这个接口——PUT 是整表替换，会撤销当前页以外的人。
+ */
+export function patchKnowledgeBaseAccess(
+  id: string,
+  data: { visibility_mode?: string; members: KBAccessMember[] },
+) {
+  return patch(`/api/v1/knowledge-bases/${id}/access`, data)
 }
 
 /** Queue a derived-PDF render for every Office document in the workspace. */

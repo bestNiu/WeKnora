@@ -145,6 +145,71 @@ func (r *kbUserAccessRepository) ReplaceForKB(
 	})
 }
 
+// UpsertForKB applies only the listed grants, leaving every other member's row
+// untouched. The member panel pages, so a full replace from one page would
+// silently revoke the members that page did not include.
+//
+// A grant with can_view=false AND can_download=false means "revoke": the row is
+// soft-deleted so the audit trail keeps the previous state.
+func (r *kbUserAccessRepository) UpsertForKB(
+	ctx context.Context, tenantID uint64, kbID, grantedBy string, grants []types.KBUserGrant,
+) error {
+	if kbID == "" {
+		return errors.New("kb_user_access: knowledge base id is required")
+	}
+	if len(grants) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, grant := range grants {
+			if grant.UserID == "" {
+				return errors.New("kb_user_access: user id is required")
+			}
+			if grant.CanDownload {
+				grant.CanView = true // downloading without reading is incoherent
+			}
+			if !grant.CanView && !grant.CanDownload {
+				if err := tx.Where("tenant_id = ? AND knowledge_base_id = ? AND user_id = ?",
+					tenantID, kbID, grant.UserID).Delete(&types.KBUserAccess{}).Error; err != nil {
+					return fmt.Errorf("revoke kb user access: %w", err)
+				}
+				continue
+			}
+
+			var existing types.KBUserAccess
+			err := tx.Unscoped().
+				Where("tenant_id = ? AND knowledge_base_id = ? AND user_id = ?",
+					tenantID, kbID, grant.UserID).
+				First(&existing).Error
+			switch {
+			case errors.Is(err, gorm.ErrRecordNotFound):
+				row := &types.KBUserAccess{
+					TenantID: tenantID, KnowledgeBaseID: kbID, UserID: grant.UserID,
+					CanView: grant.CanView, CanDownload: grant.CanDownload, GrantedBy: grantedBy,
+				}
+				if createErr := tx.Create(row).Error; createErr != nil {
+					return fmt.Errorf("create kb user access: %w", createErr)
+				}
+			case err != nil:
+				return fmt.Errorf("load kb user access: %w", err)
+			default:
+				if updateErr := tx.Unscoped().
+					Model(&types.KBUserAccess{}).
+					Where("id = ?", existing.ID).
+					Updates(map[string]interface{}{
+						"can_view":     grant.CanView,
+						"can_download": grant.CanDownload,
+						"granted_by":   grantedBy,
+						"deleted_at":   nil,
+					}).Error; updateErr != nil {
+					return fmt.Errorf("update kb user access: %w", updateErr)
+				}
+			}
+		}
+		return nil
+	})
+}
+
 // DeleteByKB soft-deletes every grant for a knowledge base.
 func (r *kbUserAccessRepository) DeleteByKB(
 	ctx context.Context, tenantID uint64, kbID string,

@@ -180,6 +180,14 @@ const (
 
 	AuditActionKBAccessUpdated          AuditAction = "kb.access_updated"
 	AuditActionAgentAccessUpdated       AuditAction = "agent.access_updated"
+	// Member access telemetry. Views and downloads are recorded per member so
+	// the KB access panel can show activity and the download guard can audit a
+	// refusal; "suspended" marks the risk freeze the guard applies.
+	AuditActionKnowledgeViewed  AuditAction = "knowledge.viewed"
+	AuditActionKnowledgeDownloaded AuditAction = "knowledge.downloaded"
+	AuditActionDownloadBlocked  AuditAction = "download.blocked"
+	AuditActionDownloadSuspended AuditAction = "download.suspended"
+
 	AuditActionKBShareAdded             AuditAction = "kb.share_added"
 	AuditActionKBSharePermissionChanged AuditAction = "kb.share_permission_changed"
 	AuditActionKBShareRemoved           AuditAction = "kb.share_removed"

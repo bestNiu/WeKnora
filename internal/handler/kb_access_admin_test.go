@@ -30,6 +30,25 @@ func (s *kbAccessKBStub) SetVisibilityMode(_ context.Context, _ string, mode typ
 	return nil
 }
 
+// kbAccessMemberStub pages over workspace members. GetKBAccess reads members,
+// not grants, because a member without a grant must still be listed.
+type kbAccessMemberStub struct {
+	interfaces.TenantMemberService
+	members []*types.TenantMember
+}
+
+func (s *kbAccessMemberStub) ListMembersPage(
+	context.Context, uint64, string, int, int,
+) ([]*types.TenantMember, int64, error) {
+	return s.members, int64(len(s.members)), nil
+}
+
+// ListByTenant backs the write path, which validates that every granted user is
+// a workspace member.
+func (s *kbAccessMemberStub) ListByTenant(context.Context, uint64) ([]*types.TenantMember, error) {
+	return s.members, nil
+}
+
 type kbAccessGrantStub struct {
 	interfaces.KBUserAccessService
 	rows     []*types.KBUserAccess
@@ -72,9 +91,16 @@ func runKBAccess(
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
+	members := make([]*types.TenantMember, 0, len(grants.rows))
+	for _, row := range grants.rows {
+		members = append(members, &types.TenantMember{
+			UserID: row.UserID, TenantID: 7, Role: types.TenantRoleViewer,
+		})
+	}
 	h := &KBAccessAdminHandler{
 		kbService:     &kbAccessKBStub{kb: kb},
 		accessService: grants,
+		memberService: &kbAccessMemberStub{members: members},
 	}
 	router.GET("/knowledge-bases/:id/access", h.GetKBAccess)
 	router.PUT("/knowledge-bases/:id/access", h.PutKBAccess)
