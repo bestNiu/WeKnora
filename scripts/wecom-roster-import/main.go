@@ -46,6 +46,7 @@ const apiBase = "https://qyapi.weixin.qq.com"
 type directoryEntry struct {
 	UserID string
 	Name   string
+	Perm   string // roster's second column: 下载 / 管理 / 浏览
 }
 
 func main() {
@@ -96,19 +97,20 @@ func main() {
 
 	var matched []directoryEntry
 	var missing, ambiguous []string
-	for _, name := range roster {
-		candidates := byName[normalizeName(name)]
+	for _, entry := range roster {
+		candidates := byName[normalizeName(entry.Name)]
 		switch len(candidates) {
 		case 1:
+			candidates[0].Perm = entry.Perm
 			matched = append(matched, candidates[0])
 		case 0:
-			missing = append(missing, name)
+			missing = append(missing, entry.Name)
 		default:
 			ids := make([]string, 0, len(candidates))
 			for _, c := range candidates {
 				ids = append(ids, c.UserID)
 			}
-			ambiguous = append(ambiguous, fmt.Sprintf("%s (%s)", name, strings.Join(ids, "/")))
+			ambiguous = append(ambiguous, fmt.Sprintf("%s (%s)", entry.Name, strings.Join(ids, "/")))
 		}
 	}
 	sort.Slice(matched, func(i, j int) bool { return matched[i].UserID < matched[j].UserID })
@@ -179,26 +181,32 @@ func splitList(value string) []string {
 	return out
 }
 
-func readRoster(path string) ([]string, error) {
+func readRoster(path string) ([]directoryEntry, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	var names []string
+	var entries []directoryEntry
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		name := strings.TrimSpace(strings.Split(line, ",")[0])
-		if name != "" {
-			names = append(names, name)
+		cols := strings.Split(line, ",")
+		name := strings.TrimSpace(cols[0])
+		if name == "" {
+			continue
 		}
+		perm := ""
+		if len(cols) > 1 {
+			perm = strings.TrimSpace(cols[1])
+		}
+		entries = append(entries, directoryEntry{Name: name, Perm: perm})
 	}
-	return names, scanner.Err()
+	return entries, scanner.Err()
 }
 
 // normalizeName drops the Latin alias in parentheses ("范晓晴(Bella)") and the
@@ -255,10 +263,53 @@ func fetchDirectory(corpID, secret string) ([]directoryEntry, error) {
 	}
 
 	entries := make([]directoryEntry, 0, len(seen))
+	if len(seen) == 0 {
+		// department/list answers 0 with an empty body when the app was never
+		// granted the 通讯录 read API, but tag/get still returns member names
+		// and userids. Tags are a coarser source of truth, so say so loudly.
+		fmt.Fprintln(os.Stderr, "警告：department/list 返回空部门（应用无通讯录读取权限），回退到标签成员")
+		if err := fetchTagMembers(token, seen); err != nil {
+			return nil, err
+		}
+	}
 	for _, entry := range seen {
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+// fetchTagMembers fills seen from every tag the app can read.
+func fetchTagMembers(token string, seen map[string]directoryEntry) error {
+	var tagResp struct {
+		TagList []struct {
+			TagID int `json:"tagid"`
+		} `json:"taglist"`
+	}
+	if err := getJSON(fmt.Sprintf("%s/cgi-bin/tag/list?access_token=%s",
+		apiBase, url.QueryEscape(token)), &tagResp); err != nil {
+		return err
+	}
+	for _, tag := range tagResp.TagList {
+		var members struct {
+			UserList []struct {
+				UserID string `json:"userid"`
+				Name   string `json:"name"`
+			} `json:"userlist"`
+		}
+		endpoint := fmt.Sprintf("%s/cgi-bin/tag/get?access_token=%s&tagid=%d",
+			apiBase, url.QueryEscape(token), tag.TagID)
+		if err := getJSON(endpoint, &members); err != nil {
+			fmt.Fprintf(os.Stderr, "跳过标签 %d: %v\n", tag.TagID, err)
+			continue
+		}
+		for _, user := range members.UserList {
+			if user.UserID == "" {
+				continue
+			}
+			seen[user.UserID] = directoryEntry{UserID: user.UserID, Name: user.Name}
+		}
+	}
+	return nil
 }
 
 func accessToken(corpID, secret string) (string, error) {
@@ -314,7 +365,9 @@ func emitSQL(w io.Writer, members []directoryEntry, tenantID uint64, role, kbNam
 		if err != nil {
 			fatalf("bcrypt: %v", err)
 		}
-		fmt.Fprintf(w, "-- %s (%s)\n", member.Name, member.UserID)
+		// 浏览 = 可读不可下载；下载 / 管理 / 留空 = 可读可下载。
+		canDownload := member.Perm != "浏览"
+		fmt.Fprintf(w, "-- %s (%s, %s)\n", member.Name, member.UserID, orDefault(member.Perm, "下载"))
 		fmt.Fprintf(w, `DO $$
 DECLARE
   uid     text;
@@ -350,11 +403,11 @@ BEGIN
 
   IF EXISTS (SELECT 1 FROM kb_user_access
               WHERE knowledge_base_id = kbid AND user_id = uid AND deleted_at IS NULL) THEN
-    UPDATE kb_user_access SET can_view = true, can_download = true, updated_at = now()
+    UPDATE kb_user_access SET can_view = true, can_download = %t, updated_at = now()
      WHERE knowledge_base_id = kbid AND user_id = uid AND deleted_at IS NULL;
   ELSE
     INSERT INTO kb_user_access (id, tenant_id, knowledge_base_id, user_id, can_view, can_download, created_at, updated_at)
-    VALUES (gen_random_uuid()::text, %d, kbid, uid, true, true, now(), now());
+    VALUES (gen_random_uuid()::text, %d, kbid, uid, true, %t, now(), now());
   END IF;
 END $$;
 
@@ -364,7 +417,8 @@ END $$;
 			quote(member.UserID), quote(member.Name),
 			tenantID, quote(member.UserID),
 			tenantID, tenantID, quote(role),
-			tenantID)
+			canDownload,
+			tenantID, canDownload)
 	}
 
 	fmt.Fprintf(w, "-- 知识库可见性：名单只开放 %s，其余同名库收紧\n", kbName)
@@ -377,6 +431,13 @@ END $$;
 
 func quote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func orDefault(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func randomSecret() string {
