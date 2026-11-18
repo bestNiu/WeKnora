@@ -2323,8 +2323,8 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
       link.remove();
       URL.revokeObjectURL(objectUrl);
     });
-  } catch {
-    MessagePlugin.error(t('file.downloadFailed'));
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('file.downloadFailed'));
   }
 };
 

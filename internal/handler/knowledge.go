@@ -144,14 +144,15 @@ func (h *KnowledgeHandler) RecordKnowledgeView(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": true})
 		return
 	}
-	tenantID := caller.TenantID
+	// Count against the document's own workspace so the KB owner sees activity
+	// on a KB shared to another tenant; the panel queries by kb.TenantID.
 	item, err := h.kgService.GetKnowledgeByID(ctx, c.Param("id"))
 	if err != nil || item == nil {
 		// Unknown or out-of-scope document: nothing to count, no error either.
 		c.JSON(http.StatusOK, gin.H{"success": true})
 		return
 	}
-	if err := h.accessStats.RecordView(ctx, tenantID, item.KnowledgeBaseID, caller.UserID, item.ID); err != nil {
+	if err := h.accessStats.RecordView(ctx, item.TenantID, item.KnowledgeBaseID, caller.UserID, item.ID); err != nil {
 		logger.Warnf(ctx, "record knowledge view failed for %s: %v", item.ID, err)
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -2145,6 +2146,12 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 			c.Error(errors.NewForbiddenError("没有该知识库的下载权限"))
 			return
 		}
+	}
+	// 单文件下载与批量下载共用同一套计数与冻结规则。这一步之前，"下载"只做了
+	// 权限判定，从不写统计——用户的每一次单文件下载都不会出现在面板里。
+	if guardErr := h.authorizeDownload(ctx, knowledge.TenantID, knowledge.KnowledgeBaseID, 1); guardErr != nil {
+		_ = c.Error(guardErr)
+		return
 	}
 	logger.Infof(ctx, "Retrieving knowledge file, ID: %s", secutils.SanitizeForLog(id))
 

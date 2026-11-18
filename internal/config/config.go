@@ -422,6 +422,17 @@ type KBDownloadLimitConfig struct {
 	SuspendHours int `yaml:"suspend_hours" json:"suspend_hours"`
 }
 
+// Defaults for the download risk policy. They apply when neither config.yaml
+// nor the environment declares a value, so a deployment that never touches
+// KB_DOWNLOAD_* still gets a working guard. An explicit 0 still turns that one
+// rule off.
+const (
+	DefaultKBDownloadDailyLimit    = 20
+	DefaultKBDownloadWindowMinutes = 10
+	DefaultKBDownloadWindowLimit   = 10
+	DefaultKBDownloadSuspendHours  = 24
+)
+
 // PromptTemplateI18n holds localized name and description for a prompt template.
 type PromptTemplateI18n struct {
 	Name        string `yaml:"name"        json:"name"`
@@ -913,11 +924,20 @@ func applyWeComAuthEnvOverrides(cfg *Config) {
 	}
 }
 
-// applyKBDownloadEnvOverrides reads the download guard knobs. Defaults live in
-// the service; an operator only sets the env var that differs.
+// applyKBDownloadEnvOverrides reads the download guard knobs. The defaults are
+// materialised here (not in the service) so that a missing section no longer
+// arrives as an all-zero struct that disables every rule; each KB_DOWNLOAD_*
+// variable then overrides just its own knob.
 func applyKBDownloadEnvOverrides(cfg *Config) {
+	// A section declared in config.yaml wins verbatim, including an explicit 0
+	// that turns a rule off. Only an absent section gets the defaults.
 	if cfg.KBDownload == nil {
-		cfg.KBDownload = &KBDownloadLimitConfig{}
+		cfg.KBDownload = &KBDownloadLimitConfig{
+			DailyLimit:    DefaultKBDownloadDailyLimit,
+			WindowMinutes: DefaultKBDownloadWindowMinutes,
+			WindowLimit:   DefaultKBDownloadWindowLimit,
+			SuspendHours:  DefaultKBDownloadSuspendHours,
+		}
 	}
 	if value := strings.TrimSpace(os.Getenv("KB_DOWNLOAD_DAILY_LIMIT")); value != "" {
 		if n, err := strconv.Atoi(value); err == nil && n >= 0 {

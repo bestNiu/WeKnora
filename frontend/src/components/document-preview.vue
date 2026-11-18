@@ -10,6 +10,7 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
+import { MessagePlugin } from 'tdesign-vue-next';
 import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
@@ -487,8 +488,10 @@ async function downloadOriginal() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  } catch (err) {
+  } catch (err: any) {
+    // 下载守卫的 429 会带上具体原因（今日额度已满 / 被临时冻结），直接展示给用户。
     console.error('Failed to download the original file:', err);
+    MessagePlugin.error(err?.message || t('file.downloadFailed'));
   }
 }
 

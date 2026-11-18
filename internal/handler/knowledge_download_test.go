@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
@@ -27,6 +28,7 @@ import (
 type downloadKnowledgeStub struct {
 	interfaces.KnowledgeService
 	items          []*types.Knowledge
+	knowledge      *types.Knowledge
 	names          map[string]string
 	opened         []string
 	failID         string
@@ -35,6 +37,15 @@ type downloadKnowledgeStub struct {
 
 func (s *downloadKnowledgeStub) GetKnowledgeBatch(context.Context, uint64, []string) ([]*types.Knowledge, error) {
 	return s.items, nil
+}
+
+// GetKnowledgeByIDOnly feeds the single-file download path, which resolves the
+// document (and therefore its KB) from the URL id.
+func (s *downloadKnowledgeStub) GetKnowledgeByIDOnly(_ context.Context, id string) (*types.Knowledge, error) {
+	if s.knowledge != nil && s.knowledge.ID == id {
+		return s.knowledge, nil
+	}
+	return nil, fmt.Errorf("knowledge %s not found", id)
 }
 
 func (s *downloadKnowledgeStub) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
@@ -79,6 +90,7 @@ func runBatchDownload(
 	kb *types.KnowledgeBase,
 	share interfaces.KBShareService,
 	scope *types.TenantAPIKeyScope,
+	stats ...interfaces.KBAccessStatsService,
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -103,6 +115,9 @@ func runBatchDownload(
 		kgService:      svc,
 		kbService:      &downloadKBStub{kb: kb},
 		kbShareService: share,
+	}
+	if len(stats) > 0 {
+		h.accessStats = stats[0]
 	}
 	router.POST("/knowledge-bases/:id/knowledge/batch-download", h.BatchDownloadKnowledge)
 	body, err := json.Marshal(BatchDownloadKnowledgeRequest{IDs: ids})
@@ -484,4 +499,150 @@ func TestBatchDownloadAllowsGrantedViewer(t *testing.T) {
 	resolver := &stubDownloadVisibility{canView: true, canDownload: true}
 	w := runBatchDownloadAs(t, types.TenantRoleViewer, kb, resolver, []string{"a"})
 	require.Equal(t, http.StatusOK, w.Code)
+}
+
+// downloadStatsCall is one recorded guard decision request.
+type downloadStatsCall struct {
+	TenantID uint64
+	KBID     string
+	UserID   string
+	Units    int
+}
+
+// downloadStatsStub records the guard calls. A nil decision means "allowed",
+// which keeps the happy-path tests short.
+type downloadStatsStub struct {
+	interfaces.KBAccessStatsService
+	calls    []downloadStatsCall
+	decision *types.KBDownloadDecision
+	err      error
+}
+
+func (s *downloadStatsStub) AuthorizeDownload(
+	_ context.Context, tenantID uint64, kbID, userID string, units int,
+) (types.KBDownloadDecision, error) {
+	s.calls = append(s.calls, downloadStatsCall{TenantID: tenantID, KBID: kbID, UserID: userID, Units: units})
+	if s.err != nil {
+		return types.KBDownloadDecision{}, s.err
+	}
+	if s.decision != nil {
+		return *s.decision, nil
+	}
+	return types.KBDownloadDecision{Allowed: true}, nil
+}
+
+func runSingleDownload(
+	t *testing.T,
+	svc *downloadKnowledgeStub,
+	kb *types.KnowledgeBase,
+	stats interfaces.KBAccessStatsService,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.ErrorHandler(), func(c *gin.Context) {
+		ctx := types.WithCaller(c.Request.Context(), types.Caller{
+			TenantID: 7, UserID: "user-1", Role: types.TenantRoleAdmin,
+		})
+		ctx = types.WithExecutionTenant(ctx, 7)
+		c.Request = c.Request.WithContext(ctx)
+		c.Set(types.TenantIDContextKey.String(), uint64(7))
+		c.Set(types.UserIDContextKey.String(), "user-1")
+		c.Next()
+	})
+	h := &KnowledgeHandler{
+		kgService:      svc,
+		kbService:      &downloadKBStub{kb: kb},
+		kbShareService: &downloadShareStub{permission: types.OrgRoleEditor},
+		accessStats:    stats,
+	}
+	router.GET("/knowledge/:id/download", h.DownloadKnowledgeFile)
+	req := httptest.NewRequest(http.MethodGet, "/knowledge/a/download", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	return w
+}
+
+// The single-file download is the button every list row and preview drawer
+// uses; it must charge exactly one unit against the document's own workspace.
+func TestDownloadKnowledgeCountsOneRequest(t *testing.T) {
+	svc := &downloadKnowledgeStub{
+		knowledge: &types.Knowledge{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "stored-a"},
+		names:     map[string]string{"a": "a.pdf"},
+	}
+	stats := &downloadStatsStub{}
+	w := runSingleDownload(t, svc, &types.KnowledgeBase{ID: "kb-1", TenantID: 7, VisibilityMode: "tenant"}, stats)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []downloadStatsCall{{TenantID: 7, KBID: "kb-1", UserID: "user-1", Units: 1}}, stats.calls)
+	require.Equal(t, []string{"a"}, svc.opened)
+}
+
+// A refusal answers 429 before touching storage, so a frozen member cannot pull
+// bytes through the download endpoint.
+func TestDownloadKnowledgeRefusedByGuard(t *testing.T) {
+	svc := &downloadKnowledgeStub{
+		knowledge: &types.Knowledge{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "stored-a"},
+		names:     map[string]string{"a": "a.pdf"},
+	}
+	stats := &downloadStatsStub{decision: &types.KBDownloadDecision{
+		Allowed: false, Reason: types.KBDownloadDeniedSuspended, Message: "下载权限已被临时冻结，请联系管理员",
+		RetryAfter: time.Hour, DownloadsToday: 3, DailyLimit: 20,
+	}}
+	w := runSingleDownload(t, svc, &types.KnowledgeBase{ID: "kb-1", TenantID: 7, VisibilityMode: "tenant"}, stats)
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+	require.Empty(t, svc.opened, "a refused download must not open the file")
+	require.Contains(t, w.Body.String(), "冻结")
+}
+
+// A stats outage must never block a download: the guard fails open and the file
+// still streams.
+func TestDownloadKnowledgeAllowsWhenGuardFails(t *testing.T) {
+	svc := &downloadKnowledgeStub{
+		knowledge: &types.Knowledge{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "stored-a"},
+		names:     map[string]string{"a": "a.pdf"},
+	}
+	w := runSingleDownload(t, svc, &types.KnowledgeBase{ID: "kb-1", TenantID: 7, VisibilityMode: "tenant"},
+		&downloadStatsStub{err: fmt.Errorf("stats table unavailable")})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []string{"a"}, svc.opened)
+}
+
+// The batch is charged per document that will actually be packed: an entry
+// without an original file is skipped, so it must not consume quota.
+func TestBatchDownloadChargesOnlyPackedEntries(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	svc := &downloadKnowledgeStub{
+		items: []*types.Knowledge{
+			{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "stored-a"},
+			{ID: "url", TenantID: 7, KnowledgeBaseID: "kb-1", Type: "url"},
+			{ID: "b", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "stored-b"},
+		},
+		names: map[string]string{"a": "a.txt", "b": "b.txt"},
+	}
+	stats := &downloadStatsStub{}
+	w := runBatchDownload(t, svc, []string{"a", "url", "b"},
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7}, nil, nil, stats)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []downloadStatsCall{{TenantID: 7, KBID: "kb-1", UserID: "user-1", Units: 2}}, stats.calls)
+	reader, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	require.NoError(t, err)
+	require.Len(t, reader.File, 2)
+}
+
+// The batch guard answers 429 before the archive is built, so nothing is read
+// from storage when the member is over quota.
+func TestBatchDownloadRefusedByGuardReadsNothing(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	svc := &downloadKnowledgeStub{
+		items: []*types.Knowledge{{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "stored-a"}},
+		names: map[string]string{"a": "a.txt"},
+	}
+	stats := &downloadStatsStub{decision: &types.KBDownloadDecision{
+		Allowed: false, Reason: types.KBDownloadDeniedDailyQuota, Message: "今日下载次数已达上限（20 次）",
+		RetryAfter: time.Hour, DownloadsToday: 20, DailyLimit: 20,
+	}}
+	w := runBatchDownload(t, svc, []string{"a"},
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7}, nil, nil, stats)
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+	require.Empty(t, svc.opened)
 }

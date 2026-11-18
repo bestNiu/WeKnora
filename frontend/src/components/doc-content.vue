@@ -1562,7 +1562,7 @@ const downloadFile = () => {
       }
     })
     .catch((err) => {
-      MessagePlugin.error(t('file.downloadFailed'));
+      MessagePlugin.error(err?.message || t('file.downloadFailed'));
     });
 };
 const handleChunkPageChange = (pageInfo: { current: number }) => {

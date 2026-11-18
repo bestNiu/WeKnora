@@ -107,32 +107,6 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 		}
 	}
 
-	// 下载风控：每日配额与异常冻结。放在权限校验之后、取文档之前，命中即拒绝，
-	// 不产生任何文件 IO。计数在「授权通过」这一刻发生，与传输成败解耦。
-	if h.accessStats != nil {
-		caller := types.CallerFromContext(c.Request.Context())
-		if caller.TenantID != 0 && caller.UserID != "" {
-			// 批量下载按文档数计费：200 个文件消耗 200 次额度。
-			decision, guardErr := h.accessStats.AuthorizeDownload(
-				c.Request.Context(), tenantID, kbID, caller.UserID, len(ids))
-			if guardErr != nil {
-				logger.Warnf(c.Request.Context(), "download guard failed for kb=%s user=%s: %v",
-					kbID, caller.UserID, guardErr)
-			} else if !decision.Allowed {
-				retryAfter := int(decision.RetryAfter.Seconds())
-				_ = c.Error(errors.NewTooManyRequestsError(decision.Message).
-					WithDetails(map[string]any{
-						"reason":             decision.Reason,
-						"downloads_today":    decision.DownloadsToday,
-						"daily_limit":        decision.DailyLimit,
-						"retry_after_seconds": retryAfter,
-						"risk_triggered":     decision.RiskTriggered,
-					}))
-				return
-			}
-		}
-	}
-
 	items, err := h.kgService.GetKnowledgeBatch(ctx, tenantID, ids)
 	if err != nil {
 		_ = c.Error(errors.NewInternalServerError("无法获取待下载文档，请稍后重试"))
@@ -159,6 +133,14 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 	}
 	if len(entries) == 0 {
 		_ = c.Error(errors.NewBadRequestError("所选文档没有可下载的原始文件，请取消选择后重试"))
+		return
+	}
+
+	// 下载风控：按真正会打包的文档数计费——跳过的网页条目不该消耗额度。
+	// 计数在「授权通过」这一刻发生，与传输成败解耦；这里只跑过元数据查询，
+	// 尚未读取任何文件，命中即拒绝仍然不产生文件 IO。
+	if guardErr := h.authorizeDownload(ctx, tenantID, kbID, len(entries)); guardErr != nil {
+		_ = c.Error(guardErr)
 		return
 	}
 
@@ -199,6 +181,43 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to send knowledge archive: %v", err)
 	}
+}
+
+// authorizeDownload runs the per-member download guard for one request and
+// returns the 429 to surface when it refuses. Counting happens when the request
+// is granted, not when the last byte is written, so a cancelled transfer still
+// costs its quota.
+//
+// A guard failure is logged and treated as allowed: a stats outage must never
+// stop a download, and the same rule keeps a nil-wired handler working in
+// reduced deployments.
+func (h *KnowledgeHandler) authorizeDownload(
+	ctx context.Context, tenantID uint64, kbID string, units int,
+) error {
+	if h.accessStats == nil {
+		return nil
+	}
+	caller := types.CallerFromContext(ctx)
+	// Machine principals resolve to their bound owner (API key, embed, IM);
+	// only an unbound principal has no member row to charge.
+	if caller.TenantID == 0 || caller.UserID == "" {
+		return nil
+	}
+	decision, err := h.accessStats.AuthorizeDownload(ctx, tenantID, kbID, caller.UserID, units)
+	if err != nil {
+		logger.Warnf(ctx, "download guard failed for kb=%s user=%s: %v", kbID, caller.UserID, err)
+		return nil
+	}
+	if decision.Allowed {
+		return nil
+	}
+	return errors.NewTooManyRequestsError(decision.Message).WithDetails(map[string]any{
+		"reason":              decision.Reason,
+		"downloads_today":     decision.DownloadsToday,
+		"daily_limit":         decision.DailyLimit,
+		"retry_after_seconds": int(decision.RetryAfter.Seconds()),
+		"risk_triggered":      decision.RiskTriggered,
+	})
 }
 
 func tryAcquireBatchDownloadSlot() bool {

@@ -18,22 +18,17 @@ type kbAccessStatsService struct {
 	limits types.KBDownloadLimits
 }
 
-// NewKBAccessStatsService builds the service. Limits come from config so an
-// operator can tighten or relax them without a rebuild.
+// NewKBAccessStatsService builds the service. Limits come from config verbatim:
+// config.LoadConfig materialises the defaults, and an explicit 0 there is how an
+// operator turns one rule off.
 func NewKBAccessStatsService(
 	repo interfaces.KBAccessStatsRepository,
 	audit interfaces.AuditLogService,
 	cfg *config.Config,
 ) interfaces.KBAccessStatsService {
 	limits := types.KBDownloadLimits{
-		DailyLimit:    20,
-		WindowMinutes: 10,
-		WindowLimit:   10,
-		SuspendFor:    24 * time.Hour,
+		SuspendFor: time.Duration(config.DefaultKBDownloadSuspendHours) * time.Hour,
 	}
-	// A configured section wins verbatim: an explicit 0 disables that rule,
-	// which is the only way an operator can turn the guard off without a code
-	// change. Defaults above apply only when the section is absent.
 	if cfg != nil && cfg.KBDownload != nil {
 		limits.DailyLimit = cfg.KBDownload.DailyLimit
 		limits.WindowMinutes = cfg.KBDownload.WindowMinutes
@@ -117,9 +112,9 @@ func (s *kbAccessStatsService) AuthorizeDownload(
 		decision.SuspendedUntil = stat.DownloadSuspendedUntil
 		decision.DownloadsToday = stat.DownloadsQuotaDay
 		s.auditDownload(ctx, tenantID, kbID, userID, types.AuditActionDownloadBlocked, map[string]any{
-			"reason":                  types.KBDownloadDeniedSuspended,
-			"suspended_until":         stat.DownloadSuspendedUntil,
-			"risk_reason":             stat.RiskReason,
+			"reason":                   types.KBDownloadDeniedSuspended,
+			"suspended_until":          stat.DownloadSuspendedUntil,
+			"risk_reason":              stat.RiskReason,
 			"download_suspended_until": stat.DownloadSuspendedUntil,
 		})
 		return decision, nil
@@ -142,7 +137,7 @@ func (s *kbAccessStatsService) AuthorizeDownload(
 		decision.RetryAfter = today.Add(24 * time.Hour).Sub(now)
 		decision.DownloadsToday = stat.DownloadsQuotaDay
 		s.auditDownload(ctx, tenantID, kbID, userID, types.AuditActionDownloadBlocked, map[string]any{
-			"reason":         types.KBDownloadDeniedDailyQuota,
+			"reason":          types.KBDownloadDeniedDailyQuota,
 			"downloads_today": stat.DownloadsQuotaDay,
 			"daily_limit":     s.limits.DailyLimit,
 		})
@@ -174,10 +169,10 @@ func (s *kbAccessStatsService) AuthorizeDownload(
 		decision.DownloadsToday = stat.DownloadsQuotaDay
 		s.persist(ctx, stat, isNew)
 		s.auditDownload(ctx, tenantID, kbID, userID, types.AuditActionDownloadSuspended, map[string]any{
-			"reason":            stat.RiskReason,
+			"reason":              stat.RiskReason,
 			"downloads_in_window": stat.DownloadsInWindow,
-			"window_minutes":    s.limits.WindowMinutes,
-			"suspended_until":   until,
+			"window_minutes":      s.limits.WindowMinutes,
+			"suspended_until":     until,
 		})
 		return decision, nil
 	}
