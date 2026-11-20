@@ -3064,7 +3064,6 @@ defineExpose({
                   <div class="model-option-left">
                     <div class="model-option-name-wrap">
                       <span class="model-option-name">{{ $t('input.modelFollowDefault') }}</span>
-                      <span class="model-option-raw-name">{{ modelDisplayName(embeddedDefaultModel) }}</span>
                     </div>
                   </div>
                   <span class="model-option-check">
@@ -3077,7 +3076,6 @@ defineExpose({
                   <div class="model-option-left">
                     <div class="model-option-name-wrap">
                       <span class="model-option-name">{{ modelDisplayName(model) }}</span>
-                      <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
                     </div>
                   </div>
                   <span
@@ -4209,12 +4207,6 @@ const getImgSrc = (url: string) => {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.4;
-}
-
-.model-option-raw-name {
-  font-size: var(--app-text-xs);
-  color: var(--td-text-color-placeholder);
-  flex-shrink: 0;
 }
 
 .model-option-ctx {

@@ -31,7 +31,6 @@
         <div class="model-option">
           <t-icon name="check-circle-filled" class="model-icon" />
           <span class="model-name">{{ modelDisplayName(model) }}</span>
-          <span v-if="model.display_name" class="model-raw-name">{{ model.name }}</span>
           <t-tag v-if="model.is_builtin" size="small" theme="primary">{{ $t('model.builtinTag') }}</t-tag>
           <t-tag v-if="model.is_default" size="small" theme="success">{{ $t('model.defaultTag') }}</t-tag>
           <span
@@ -199,16 +198,6 @@ onMounted(() => {
     flex: 0 1 auto;
     min-width: 0;
     font-size: var(--app-text-md);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .model-raw-name {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--app-text-sm);
-    color: var(--td-text-color-placeholder);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
