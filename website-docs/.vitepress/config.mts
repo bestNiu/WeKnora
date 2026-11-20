@@ -85,9 +85,9 @@ const repo = 'https://www.unionclin.com'
 
 export default withMermaid(
   defineConfig({
-    title: '有临 YLKnow',
-    titleTemplate: ':title · 有临 YLKnow 文档',
-    description: '有临 YLKnow 官方文档：部署、配置、功能说明、API 参考与二次开发',
+    title: '有临U-Know',
+    titleTemplate: ':title · 有临U-Know 文档',
+    description: '有临U-Know 官方文档：部署、配置、功能说明、API 参考与二次开发',
     lang: 'zh-CN',
     base: '/docs/',
     cleanUrls: true,
@@ -104,7 +104,7 @@ export default withMermaid(
       ['link', { rel: 'icon', href: '/docs/favicon.ico', type: 'image/x-icon' }],
       ['meta', { name: 'theme-color', content: '#007ac3' }],
       ['meta', { property: 'og:type', content: 'website' }],
-      ['meta', { property: 'og:title', content: '有临 YLKnow 文档' }],
+      ['meta', { property: 'og:title', content: '有临U-Know 文档' }],
       [
         'meta',
         {
@@ -129,7 +129,7 @@ export default withMermaid(
 
     themeConfig: {
       logoLink: { link: '/', target: '_self' },
-      siteTitle: '有临 YLKnow',
+      siteTitle: '有临U-Know',
 
       nav: [],
 
@@ -182,7 +182,7 @@ export default withMermaid(
       },
 
       footer: {
-        message: `有临 YLKnow ${repoVersionLabel}`, 
+        message: `有临U-Know ${repoVersionLabel}`, 
         copyright: '© 有临医药',
       },
     },

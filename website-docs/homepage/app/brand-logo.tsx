@@ -16,7 +16,7 @@ export function BrandLogo({ priority = false }: { priority?: boolean }) {
       }}
     >
       有临
-      <span style={{ color: "#007ac3" }}>YLKnow</span>
+      <span style={{ color: "#007ac3" }}>U-Know</span>
     </span>
   );
 }
