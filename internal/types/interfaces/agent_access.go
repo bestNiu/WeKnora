@@ -44,6 +44,13 @@ type AgentAccessRepository interface {
 		ctx context.Context, tenantID uint64, agentID, grantedBy string,
 		grants []types.AgentUserGrant,
 	) error
+	// UpsertForAgent applies only the listed grants, leaving every other row
+	// untouched. can_view=false revokes that one user; an absent user is
+	// untouched. This is what a paged member panel writes.
+	UpsertForAgent(
+		ctx context.Context, tenantID uint64, agentID, grantedBy string,
+		grants []types.AgentUserGrant,
+	) error
 	// DeleteByAgent soft-deletes every grant for an agent (used when the
 	// agent is deleted).
 	DeleteByAgent(ctx context.Context, tenantID uint64, agentID string) error
@@ -70,8 +77,15 @@ type AgentAccessService interface {
 	ListByAgent(
 		ctx context.Context, tenantID uint64, agentID string,
 	) ([]*types.AgentUserAccess, error)
-	// ReplaceForAgent applies the desired grant set.
+	// ReplaceForAgent applies the desired grant set. It is all-or-nothing, so
+	// the paged admin panel uses UpsertForAgent instead.
 	ReplaceForAgent(
+		ctx context.Context, tenantID uint64, agentID, grantedBy string,
+		grants []types.AgentUserGrant,
+	) error
+	// UpsertForAgent applies only the listed grants (incremental). The member
+	// panel pages, so a full replace would revoke members outside the page.
+	UpsertForAgent(
 		ctx context.Context, tenantID uint64, agentID, grantedBy string,
 		grants []types.AgentUserGrant,
 	) error

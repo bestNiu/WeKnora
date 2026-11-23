@@ -26,7 +26,8 @@ function setup(t: TestContext) {
     '@/composables/useListUrlState': { useListUrlState: () => ({ scope: vue.ref('all'), creator: vue.ref('all'), query: vue.ref('') }) },
     '@/composables/useResourcePins': { useResourcePins: () => ({ favorites: vue.ref([]), recents: vue.ref([]) }) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
-    '@/api/agent': {}, '@/api/chat/index': {}, '@/api/organization': {},
+    '@/api/agent': { listAgentUsage: async () => ({ data: { usage: [] } }) },
+    '@/api/chat/index': {}, '@/api/organization': {},
     '@/config/contextualGuides': {}, '@/config/settingsRoute': {},
     '@/utils/resourceListSearch': {}, '@/utils/card-list-badge': {}, '@/utils/resourceSorting': sorting,
   })

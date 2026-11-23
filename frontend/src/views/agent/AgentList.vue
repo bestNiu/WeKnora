@@ -223,11 +223,6 @@
                         <t-icon class="menu-icon" name="poweroff" />
                         <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
                       </div>
-                      <div v-if="authStore.hasRole('admin')" class="popup-menu-item"
-                        @click="handleOpenAccess(agent)">
-                        <t-icon class="menu-icon" name="usergroup" />
-                        <span>{{ $t('agentAccess.menu') }}</span>
-                      </div>
                     </div>
                   </template>
                 </t-popup>
@@ -249,6 +244,11 @@
                       :content="$t('agentAccess.badgeHint')" placement="top">
                       <t-tag theme="warning" variant="light" size="small">
                         {{ $t('agentAccess.badge') }}
+                      </t-tag>
+                    </t-tooltip>
+                    <t-tooltip v-if="agentUsage[agent.id]" :content="usageHint(agent.id)" placement="top">
+                      <t-tag theme="default" variant="light" size="small" class="usage-badge">
+                        {{ t('agent.usageCount', { count: agentUsage[agent.id].total }) }}
                       </t-tag>
                     </t-tooltip>
                     <t-tooltip
@@ -425,6 +425,11 @@
                       :content="$t('agentAccess.badgeHint')" placement="top">
                       <t-tag theme="warning" variant="light" size="small">
                         {{ $t('agentAccess.badge') }}
+                      </t-tag>
+                    </t-tooltip>
+                    <t-tooltip v-if="agentUsage[agent.id]" :content="usageHint(agent.id)" placement="top">
+                      <t-tag theme="default" variant="light" size="small" class="usage-badge">
+                        {{ t('agent.usageCount', { count: agentUsage[agent.id].total }) }}
                       </t-tag>
                     </t-tooltip>
                     <t-tooltip
@@ -761,7 +766,7 @@ import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import EmptyState from '@/components/EmptyState.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
-import { deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
+import { deleteAgent, copyAgent, listAgentUsage, type AgentUsage, type CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useI18n } from 'vue-i18n'
 import { createSessions } from '@/api/chat/index'
@@ -1082,6 +1087,34 @@ const showAgentListContextualGuide = computed(
   () => showAgentListEmpty.value && isReadyForAgent.value && !editorVisible.value,
 )
 
+// 每个智能体被使用的次数（后端按回答轮数统计）。只统计本空间的智能体：
+// 共享进来的智能体属于别的空间，后端不会返回它们的数据。
+const agentUsage = ref<Record<string, AgentUsage>>({})
+const usageHint = (id: string) => {
+  const usage = agentUsage.value[id]
+  if (!usage) return ''
+  return t('agent.usageHint', {
+    total: usage.total,
+    last7: usage.last_7_days,
+    last30: usage.last_30_days,
+  })
+}
+async function loadAgentUsage(ids: string[]) {
+  const clean = ids.filter(Boolean)
+  if (!clean.length) return
+  try {
+    const res = await listAgentUsage(clean)
+    const rows = (res as { data?: { usage?: AgentUsage[] } })?.data?.usage
+    if (!Array.isArray(rows)) return
+    const next = { ...agentUsage.value }
+    for (const row of rows) next[row.agent_id] = row
+    agentUsage.value = next
+  } catch (err) {
+    // 次数是装饰性信息，失败不打扰用户。
+    console.warn('Failed to load agent usage:', err)
+  }
+}
+
 const applyAgentListData = (res: { data: CustomAgent[]; disabled_own_agent_ids: string[] }) => {
   const disabledOwnIds = res.disabled_own_agent_ids || []
   agents.value = (res.data || []).map((agent: CustomAgent) => ({
@@ -1089,6 +1122,8 @@ const applyAgentListData = (res: { data: CustomAgent[]; disabled_own_agent_ids: 
     showMore: false,
     disabled_by_me: disabledOwnIds.includes(agent.id)
   }))
+  // 使用次数是附加信息：单独请求，拿不到就不显示，不影响列表本身。
+  void loadAgentUsage(agents.value.map((agent) => agent.id))
   void checkAndOpenEditModal()
 }
 

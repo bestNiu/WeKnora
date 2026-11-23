@@ -1,4 +1,4 @@
-import { get, post, put, del } from "../../utils/request";
+import { get, post, put, patch, del } from "../../utils/request";
 import type { AssistantAccessLevel } from "../assistant";
 
 // 智能体配置
@@ -216,28 +216,79 @@ export function getAgentById(id: string) {
 }
 
 // 智能体成员可见性
+// 后端按空间成员分页返回，一次一页；姓名/邮箱/角色由后端回填，前端不再自行拉全量成员做 join。
 export interface AgentAccessMember {
   user_id: string;
+  username?: string;
+  email?: string;
+  role?: 'owner' | 'admin' | 'contributor' | 'viewer' | string;
+  status?: 'active' | 'invited' | 'suspended' | string;
   can_view: boolean;
+  // 创建者 / 空间 Owner / Admin 始终可见：这行是事实，不是可撤销的授权。
+  implicit: boolean;
 }
 
 export interface AgentAccessPolicy {
   agent_id: string;
   visibility_mode: 'tenant' | 'allowlist';
   members: AgentAccessMember[];
+  // 成员分页信息（total 是空间成员总数，不是授权人数）。
+  total?: number;
+  page?: number;
+  page_size?: number;
+  // 该智能体当前的有效授权人数，包含不在当前页的成员。
+  granted_total?: number;
 }
 
-// 获取智能体的成员可见性策略
-export function getAgentAccess(id: string) {
-  return get<{ data: AgentAccessPolicy }>(`/api/v1/agents/${id}/access`);
+export interface ListAgentAccessParams {
+  page?: number;
+  page_size?: number;
+  /** 按邮箱/用户名筛选（服务端模糊匹配） */
+  q?: string;
 }
 
-// 替换智能体的成员可见性策略
+// 获取智能体的成员可见性策略（分页）
+export function getAgentAccess(id: string, params: ListAgentAccessParams = {}) {
+  const u = new URLSearchParams();
+  if (params.page != null && params.page > 0) u.set('page', String(params.page));
+  if (params.page_size != null && params.page_size > 0) u.set('page_size', String(params.page_size));
+  const q = params.q?.trim();
+  if (q) u.set('q', q);
+  const qs = u.toString();
+  return get<{ data: AgentAccessPolicy }>(`/api/v1/agents/${id}/access${qs ? `?${qs}` : ''}`);
+}
+
+// 增量更新成员可见性：只提交被改动过的成员，其它页的授权不受影响。
+export function patchAgentAccess(
+  id: string,
+  data: { visibility_mode: string; members: AgentAccessMember[] },
+) {
+  return patch<{ updated: number }>(`/api/v1/agents/${id}/access`, data);
+}
+
+// 替换智能体的成员可见性策略（整表覆盖，前端已改用 patchAgentAccess）
 export function putAgentAccess(
   id: string,
   data: { visibility_mode: string; members: AgentAccessMember[] },
 ) {
   return put<{ data: AgentAccessPolicy }>(`/api/v1/agents/${id}/access`, data);
+}
+
+// 智能体使用次数：按回答轮数（assistant 消息数）统计，另带近 7 / 30 天窗口。
+export interface AgentUsage {
+  agent_id: string;
+  total: number;
+  last_7_days: number;
+  last_30_days: number;
+}
+
+/** 批量取使用次数。后端只统计调用者本空间的智能体。 */
+export function listAgentUsage(ids: string[]) {
+  const clean = ids.filter(Boolean);
+  if (!clean.length) return Promise.resolve({ success: true, data: { usage: [] as AgentUsage[] } });
+  return get<{ data: { usage: AgentUsage[] } }>(
+    `/api/v1/agents/usage?ids=${encodeURIComponent(clean.join(','))}`,
+  );
 }
 
 // 创建智能体
@@ -373,6 +424,12 @@ export function getAgentTools() {
 
 // ===== IM渠道 =====
 
+// IMChannelCredentials is the platform-specific credential bag. The key set
+// differs per platform (bot_id for WeCom, app_id/app_secret for Feishu, …), so
+// the shape cannot be a closed interface; the VALUE type is still pinned to the
+// scalars the backend stores, which keeps `any` from spreading through callers.
+export type IMChannelCredentials = Record<string, string | number | boolean>;
+
 export interface IMChannel {
   id: string;
   tenant_id?: number;
@@ -388,7 +445,7 @@ export interface IMChannel {
   knowledge_base_id?: string;
   /** User this bot acts as for per-user KB access. */
   owner_user_id?: string;
-  credentials: Record<string, any>;
+  credentials: IMChannelCredentials;
   created_at?: string;
   updated_at?: string;
 }

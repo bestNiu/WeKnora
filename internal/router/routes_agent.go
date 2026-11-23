@@ -22,7 +22,8 @@ import (
 // are Viewer+, copy is Contributor+ (the copy is owned by the caller).
 func RegisterCustomAgentRoutes(
 	r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler,
-	accessHandler *handler.AgentAccessHandler, g *rbacGuards,
+	accessHandler *handler.AgentAccessHandler,
+	usageHandler *handler.AgentUsageHandler, g *rbacGuards,
 ) {
 	agents := g.apiKeyGroup(r.Group("/agents"), apiKeyFullAccess())
 	// agentsRead are the agent read endpoints. They stay full-access only for
@@ -43,6 +44,12 @@ func RegisterCustomAgentRoutes(
 		agentsWrite.POST("", g.Contributor(), agentHandler.CreateAgent)
 		// List all agents (including built-in) — Viewer+
 		agentsRead.GET("", g.Viewer(), agentHandler.ListAgents)
+		// Per-agent usage counters for the agent list. Separate from GET
+		// /agents because that endpoint also feeds the chat dropdown, which
+		// must stay a single cheap query. Must be declared before /:id.
+		if usageHandler != nil {
+			agentsRead.GET("/usage", g.Viewer(), usageHandler.ListAgentUsage)
+		}
 		// Get agent by ID — Viewer+
 		agentsRead.GET("/:id", g.Viewer(), agentHandler.GetAgent)
 		// Update agent — creator OR Admin+
@@ -56,6 +63,10 @@ func RegisterCustomAgentRoutes(
 		if accessHandler != nil {
 			// Member visibility policy — creator OR Admin+ (same as edit)
 			agentsRead.GET("/:id/access", g.OwnedAgentOrAdmin(), accessHandler.GetAgentAccess)
+			// Incremental write for the paged panel: only the rows the operator
+			// touched are sent, so grants on other pages survive.
+			agentsWrite.PATCH("/:id/access", g.OwnedAgentOrAdmin(), accessHandler.PatchAgentAccess)
+			// Full replace, kept for API clients (deprecated for the web panel).
 			agentsWrite.PUT("/:id/access", g.OwnedAgentOrAdmin(), accessHandler.PutAgentAccess)
 		}
 	}

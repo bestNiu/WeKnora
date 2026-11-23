@@ -91,6 +91,24 @@ func (s *agentAccessService) ReplaceForAgent(
 	return s.repo.ReplaceForAgent(ctx, tenantID, agentID, grantedBy, grants)
 }
 
+// UpsertForAgent applies an incremental set of grants (the paged panel sends
+// only the rows the operator touched).
+func (s *agentAccessService) UpsertForAgent(
+	ctx context.Context, tenantID uint64, agentID, grantedBy string,
+	grants []types.AgentUserGrant,
+) error {
+	if s == nil || s.repo == nil {
+		return errors.New("agent access service is unavailable")
+	}
+	if tenantID == 0 {
+		return errors.New("agent access: tenant id is required")
+	}
+	if strings.TrimSpace(agentID) == "" {
+		return errors.New("agent access: agent id is required")
+	}
+	return s.repo.UpsertForAgent(ctx, tenantID, agentID, grantedBy, grants)
+}
+
 // DeleteByAgent drops every grant for an agent.
 func (s *agentAccessService) DeleteByAgent(
 	ctx context.Context, tenantID uint64, agentID string,

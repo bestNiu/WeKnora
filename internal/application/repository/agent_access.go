@@ -206,6 +206,72 @@ func (r *agentAccessRepository) ReplaceForAgent(
 	})
 }
 
+// UpsertForAgent applies only the listed grants and leaves every other row
+// alone.
+//
+// ReplaceForAgent is all-or-nothing, which is wrong for the member panel: it
+// pages over workspace members and only submits the rows the operator touched.
+// A page-sized replace would revoke every member outside the current page, and
+// (before paging) silently drop grants an operator never saw. Here an explicit
+// can_view=false is the revoke signal; an absent user is "untouched".
+func (r *agentAccessRepository) UpsertForAgent(
+	ctx context.Context, tenantID uint64, agentID, grantedBy string,
+	grants []types.AgentUserGrant,
+) error {
+	if agentID == "" {
+		return errors.New("agent access: agent id is required")
+	}
+	if len(grants) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		for _, grant := range grants {
+			userID := strings.TrimSpace(grant.UserID)
+			if userID == "" {
+				return errors.New("agent access: user id is required")
+			}
+			var existing types.AgentUserAccess
+			err := tx.Unscoped().
+				Where("tenant_id = ? AND agent_id = ? AND user_id = ?", tenantID, agentID, userID).
+				First(&existing).Error
+			switch {
+			case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
+				return fmt.Errorf("load agent user access: %w", err)
+			case !grant.CanView:
+				// Revoke. No row means the caller is already revoked.
+				if err == nil && !existing.DeletedAt.Valid {
+					if delErr := tx.Delete(&existing).Error; delErr != nil {
+						return fmt.Errorf("revoke agent user access: %w", delErr)
+					}
+				}
+			case errors.Is(err, gorm.ErrRecordNotFound):
+				if createErr := tx.Create(&types.AgentUserAccess{
+					TenantID:  tenantID,
+					AgentID:   agentID,
+					UserID:    userID,
+					CanView:   true,
+					GrantedBy: grantedBy,
+					CreatedAt: now,
+					UpdatedAt: now,
+				}).Error; createErr != nil {
+					return fmt.Errorf("create agent user access: %w", createErr)
+				}
+			default:
+				if updErr := tx.Unscoped().Model(&existing).Updates(map[string]any{
+					"can_view":   true,
+					"granted_by": grantedBy,
+					"updated_at": now,
+					"deleted_at": nil,
+				}).Error; updErr != nil {
+					return fmt.Errorf("update agent user access: %w", updErr)
+				}
+			}
+		}
+		return nil
+	})
+}
+
 // DeleteByAgent soft-deletes every grant for an agent.
 func (r *agentAccessRepository) DeleteByAgent(
 	ctx context.Context, tenantID uint64, agentID string,
