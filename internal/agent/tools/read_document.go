@@ -29,7 +29,8 @@ var readDocumentTool = BaseTool{
 		"id is a doc://N document handle (reads a page of chunks starting at offset) or a chunk://N chunk handle " +
 		"(reads that chunk; set context to include neighbouring chunks on each side).\n" +
 		"query finds passages inside the document: matching chunks come back with one chunk of context on each " +
-		"side. By default query is case-insensitive and split on whitespace: a chunk matches when it contains " +
+		"side. Scanned pages are searched too: their text lives in the OCR chunk, so a query can match it. " +
+		"By default query is case-insensitive and split on whitespace: a chunk matches when it contains " +
 		"every word, in any order. Set regex=true to match query as one POSIX regular expression instead. " +
 		"When a query result is truncated, repeat it with offset=next_offset to get the following matches.\n" +
 		"Page through long documents with offset and limit: offset counts chunks in reading order from 0 and is " +
@@ -233,15 +234,41 @@ func (t *ReadDocumentTool) tenantFor(knowledge *types.Knowledge) uint64 {
 	return t.searchTargets.GetTenantIDForKB(knowledge.KnowledgeBaseID)
 }
 
+// readDocumentScanChunkTypes are the chunk types the in-document query walks.
+// image_ocr is included because a scanned PDF's text chunks hold nothing but an
+// image placeholder: the page's real text lives in the OCR child chunk, and a
+// query that skipped it could only report "no text" for a document that has
+// plenty. Sequential paging (listChunks) stays text/FAQ on purpose: image_ocr
+// rows do not carry a page-ordered chunk_index, so mixing them into reading
+// order would scramble the document.
+var readDocumentScanChunkTypes = []types.ChunkType{
+	types.ChunkTypeText, types.ChunkTypeFAQ, types.ChunkTypeImageOCR,
+}
+
 // listChunks fetches one page of text/FAQ chunks in document order.
 func (t *ReadDocumentTool) listChunks(
 	ctx context.Context, knowledge *types.Knowledge, page, pageSize int,
+) ([]*types.Chunk, int64, error) {
+	return t.listChunksOfTypes(ctx, knowledge, page, pageSize,
+		[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ})
+}
+
+// listScanChunks is listChunks for the query path: it also walks OCR text so a
+// scanned page can be searched inside one document.
+func (t *ReadDocumentTool) listScanChunks(
+	ctx context.Context, knowledge *types.Knowledge, page, pageSize int,
+) ([]*types.Chunk, int64, error) {
+	return t.listChunksOfTypes(ctx, knowledge, page, pageSize, readDocumentScanChunkTypes)
+}
+
+func (t *ReadDocumentTool) listChunksOfTypes(
+	ctx context.Context, knowledge *types.Knowledge, page, pageSize int, chunkTypes []types.ChunkType,
 ) ([]*types.Chunk, int64, error) {
 	enabled := true
 	chunks, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(
 		ctx, t.tenantFor(knowledge), knowledge.ID,
 		&types.Pagination{Page: page, PageSize: pageSize},
-		[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ},
+		chunkTypes,
 		nil, "", "", "", "", &enabled,
 	)
 	if err != nil {
@@ -350,10 +377,11 @@ func (t *ReadDocumentTool) readAroundChunk(
 ) (*types.ToolResult, error) {
 	total := t.countChunks(ctx, knowledge)
 	rows := []readChunkRow{{chunk: focus, role: "focus"}}
-	if contextChunks > 0 && focus.ChunkType != types.ChunkTypeFAQ {
+	if contextChunks > 0 && focus.ChunkType != types.ChunkTypeFAQ && focus.ChunkType != types.ChunkTypeImageOCR {
 		// Neighbours are resolved by chunk_index, not by list position:
 		// parent, summary and image chunks share the index sequence, so a
 		// position computed from ChunkIndex would drift away from the focus.
+		// OCR chunks carry no page-ordered index, so they get no neighbours.
 		neighbours, err := t.chunkService.GetRepository().ListChunkNeighbors(
 			ctx, t.tenantFor(knowledge), knowledge.ID, focus.ChunkIndex, contextChunks, contextChunks,
 			[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ},
@@ -433,7 +461,7 @@ func (t *ReadDocumentTool) readByQuery(
 
 scan:
 	for {
-		chunks, pageTotal, err := t.listChunks(ctx, knowledge, page, readDocumentScanPageSize)
+		chunks, pageTotal, err := t.listScanChunks(ctx, knowledge, page, readDocumentScanPageSize)
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: err.Error()}, err
 		}

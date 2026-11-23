@@ -139,19 +139,21 @@ func (f *readDocKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
 
 type readDocChunkRepo struct {
 	interfaces.ChunkRepository
-	ordered  []*types.Chunk // document order
-	listErr  error
-	requests []types.Pagination
+	ordered     []*types.Chunk // document order
+	listErr     error
+	requests    []types.Pagination
+	typeFilters [][]types.ChunkType
 }
 
 func (r *readDocChunkRepo) ListPagedChunksByKnowledgeID(
-	_ context.Context, _ uint64, _ string, page *types.Pagination, _ []types.ChunkType,
+	_ context.Context, _ uint64, _ string, page *types.Pagination, chunkTypes []types.ChunkType,
 	_ []string, _ string, _ string, _ string, _ string, _ *bool,
 ) ([]*types.Chunk, int64, error) {
 	if r.listErr != nil {
 		return nil, 0, r.listErr
 	}
 	r.requests = append(r.requests, *page)
+	r.typeFilters = append(r.typeFilters, chunkTypes)
 	start := (page.Page - 1) * page.PageSize
 	end := start + page.PageSize
 	total := int64(len(r.ordered))
@@ -596,6 +598,75 @@ func TestReadDocumentQueryContinuesFromNextOffset(t *testing.T) {
 			if id == seen && id != secondIDs[0] {
 				t.Fatalf("continuation repeated %s: first=%v second=%v", id, firstIDs, secondIDs)
 			}
+		}
+	}
+}
+
+// A scanned PDF's text chunk is an image placeholder; the page's words live in
+// the image_ocr child chunk. The query path has to walk OCR text, or the tool
+// answers "no text" for a document that is full of it.
+func TestReadDocumentQueryMatchesScannedPageOCR(t *testing.T) {
+	doc := &types.Knowledge{
+		ID: "doc-scan", TenantID: 7, KnowledgeBaseID: "kb-1", Title: "Scanned Protocol", Type: "file",
+		FileName: "scan.pdf", FileType: "pdf", FileSize: 4096, ParseStatus: "completed",
+	}
+	repo := &readDocChunkRepo{ordered: []*types.Chunk{
+		{
+			ID: "placeholder", TenantID: 7, KnowledgeID: doc.ID, KnowledgeBaseID: "kb-1",
+			ChunkIndex: 0, ChunkType: types.ChunkTypeText, IsEnabled: true,
+			Content: "![scan.pdf_page_1.jpg](resource://abc)",
+		},
+		{
+			ID: "ocr-1", TenantID: 7, KnowledgeID: doc.ID, KnowledgeBaseID: "kb-1",
+			ChunkIndex: 0, ChunkType: types.ChunkTypeImageOCR, IsEnabled: true,
+			Content: "访视 V12 第 52 周完成安全性随访。",
+		},
+	}}
+	tool := NewReadDocumentTool(
+		&readDocKnowledgeService{docs: map[string]*types.Knowledge{doc.ID: doc}},
+		&readDocChunkService{repo: repo},
+		types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 7}},
+	)
+
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"doc-scan","query":"V12"}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	ids := chunkIDsFromData(t, res.Data)
+	found := false
+	for _, id := range ids {
+		if id == "ocr-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("matched chunks = %v, want the image_ocr chunk", ids)
+	}
+	if len(repo.typeFilters) == 0 {
+		t.Fatal("no chunk-type filter recorded")
+	}
+	seen := false
+	for _, ct := range repo.typeFilters[len(repo.typeFilters)-1] {
+		if ct == types.ChunkTypeImageOCR {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatalf("query scan types = %v, want image_ocr included", repo.typeFilters[len(repo.typeFilters)-1])
+	}
+}
+
+// Sequential paging must stay text/FAQ: OCR rows carry no page-ordered index,
+// so listing them in reading order would scramble the document.
+func TestReadDocumentPagingStaysTextOnly(t *testing.T) {
+	tool, repo := newReadDocumentFixture(3)
+	if _, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"doc-1"}`)); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	last := repo.typeFilters[len(repo.typeFilters)-1]
+	for _, ct := range last {
+		if ct == types.ChunkTypeImageOCR {
+			t.Fatalf("sequential page types = %v, must not include image_ocr", last)
 		}
 	}
 }
