@@ -192,3 +192,14 @@ func TestWaitReportsSteerAsInterruptionNotTimeout(t *testing.T) {
 	require.Contains(t, result.Output, `"interrupted":true`)
 	require.Contains(t, result.Output, `"timed_out":false`)
 }
+
+// TestCollaborationAllowedByAllowlist pins the opt-in rule: an unset list keeps
+// the historical behaviour, an explicit list has to name spawn_agent.
+func TestCollaborationAllowedByAllowlist(t *testing.T) {
+	require.True(t, CollaborationAllowedByAllowlist(nil), "unset list keeps delegation")
+	require.True(t, CollaborationAllowedByAllowlist([]string{ToolSearchKnowledge, ToolSpawnAgent}))
+	require.False(t, CollaborationAllowedByAllowlist(
+		[]string{ToolSearchKnowledge, ToolReadDocument, ToolListDocuments}),
+		"a retrieval-only allowlist must not receive delegation tools")
+	require.False(t, CollaborationAllowedByAllowlist([]string{}), "an explicit empty list opts out")
+}

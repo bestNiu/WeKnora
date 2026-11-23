@@ -1582,6 +1582,11 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				logger.Infof(streamCtx.asyncCtx, "QA cancelled by user stop for session: %s", sessionID)
 			} else {
 				logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr, nil)
+				// The engine ended the turn without any answer text (round budget
+				// exhausted, stalled loop, cancelled delegation). Persisting the
+				// message as-is leaves a blank bubble that reads like a silent
+				// success after a reload, so record what happened in its place.
+				recordAgentFailure(streamCtx.assistantMessage, serviceErr)
 				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 					Type:      event.EventError,
 					SessionID: sessionID,
@@ -2132,6 +2137,28 @@ func (h *Handler) sessionTenantInfoContext(ctx context.Context) (context.Context
 		return ctx, false
 	}
 	return context.WithValue(ctx, types.TenantInfoContextKey, tenant), true
+}
+
+// recordAgentFailure writes a short human notice into an assistant message the
+// engine ended without producing any text. The error event still carries the
+// technical detail for the operator; this text is what stays in the transcript,
+// so a reloaded conversation shows why the turn is empty instead of a blank
+// bubble. Text the engine already streamed is never overwritten.
+func recordAgentFailure(message *types.Message, err error) {
+	if message == nil || strings.TrimSpace(message.Content) != "" {
+		return
+	}
+	reason := "执行过程中断。"
+	switch {
+	case strings.Contains(err.Error(), "parent iteration budget exhausted"):
+		reason = "委派的子任务没能在轮次预算内完成，本轮已中止并取消子任务。"
+	case strings.Contains(err.Error(), "collaboration stopped"):
+		reason = "委派进行中反复没有进展，本轮已中止。"
+	case stderrors.Is(err, context.DeadlineExceeded):
+		reason = "本轮执行超时。"
+	}
+	message.Content = reason + "\n\n已检索到的线索没有整理成答案。建议缩小问题范围后重试" +
+		"（例如指定适应症、靶点、年份或具体的 PI 姓名），或改为直接问某一个结论。"
 }
 
 // completeStreamAssistantMessage makes output readable before notifying clients

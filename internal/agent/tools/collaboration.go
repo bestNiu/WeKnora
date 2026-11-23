@@ -12,14 +12,46 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// The six runtime collaboration tools. They are registered by the runtime, not
+// by an agent's allowed_tools list, which is why the allowlist can only say
+// whether the runtime offers them at all (CollaborationAllowedByAllowlist).
+const (
+	ToolSpawnAgent     = "spawn_agent"
+	ToolListAgents     = "list_agents"
+	ToolSendMessage    = "send_message"
+	ToolFollowupTask   = "followup_task"
+	ToolInterruptAgent = "interrupt_agent"
+	ToolWaitAgent      = "wait_agent"
+)
+
 // CollaborationToolNames lists the six runtime collaboration tools.
 var CollaborationToolNames = []string{
-	"spawn_agent",
-	"list_agents",
-	"send_message",
-	"followup_task",
-	"interrupt_agent",
-	"wait_agent",
+	ToolSpawnAgent,
+	ToolListAgents,
+	ToolSendMessage,
+	ToolFollowupTask,
+	ToolInterruptAgent,
+	ToolWaitAgent,
+}
+
+// CollaborationAllowedByAllowlist reports whether an agent's declared
+// allowed_tools list opted into delegation by naming spawn_agent. A nil list
+// means the value was never set (built-in agents, and every agent saved before
+// allowed_tools existed): those keep the runtime tools, so nothing that already
+// delegates stops working. An explicit list that omits spawn_agent describes a
+// retrieval-only agent and must not be handed delegation tools it never asked
+// for — that is how a document-search agent ends up burning its whole round
+// budget waiting on children it should never have spawned.
+func CollaborationAllowedByAllowlist(allowed []string) bool {
+	if allowed == nil {
+		return true
+	}
+	for _, name := range NormalizeAllowedTools(allowed) {
+		if name == ToolSpawnAgent {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveDelegatedAgent authorizes and snapshots an existing template. It must

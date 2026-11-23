@@ -265,6 +265,15 @@ func (s *AgentCollaboration) attach(
 		if cfg.SharedAgentReadOnly || cfg.SkillInstallMode() {
 			return nil
 		}
+		// A retrieval-only allowlist never opted into delegation, so this turn
+		// gets no collaboration tools at all. Without this the runtime hands
+		// every agent spawn_agent/wait_agent and a parent can spend its whole
+		// iteration budget waiting on children it was never asked to create.
+		// Opt in by naming spawn_agent in the agent's allowed_tools (a nil list
+		// keeps the historical behaviour: the tools stay available).
+		if !tools.CollaborationAllowedByAllowlist(cfg.AllowedTools) {
+			return nil
+		}
 		if _, ok := tools.OperationIdentityFromContext(ctx); !ok {
 			return nil
 		}

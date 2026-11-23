@@ -563,6 +563,11 @@ type loopGuards struct {
 	// consecutiveLength counts rounds in a row that the provider cut off at
 	// the completion-token cap.
 	consecutiveLength int
+	// waitRounds counts rounds that only slept on delegated children and learned
+	// nothing (timed-out wait_agent). They do not consume the iteration budget,
+	// so a delegating parent is not starved of rounds by its own waiting; the
+	// cap keeps a parent from polling forever.
+	waitRounds int
 }
 
 // closeAnswerStream emits the Done:true marker for an answer that is actually
@@ -1337,7 +1342,49 @@ func (e *AgentEngine) runReActIteration(
 		"tool_calls":  toolCallCount,
 		"thought_len": len(step.Thought),
 	})
+
+	// A round whose only work was sleeping on delegated children produced no
+	// observation: a timed-out wait_agent returns flags, not results. Counting
+	// it against MaxIterations is what let a delegating parent burn its whole
+	// budget waiting while the children were still working, and then fail the
+	// turn outright once the budget ran out. Replay the round without advancing
+	// the counter, capped so a parent cannot poll forever.
+	if guards.waitRounds < maxWaitRounds && waitedWithoutResult(step) {
+		guards.waitRounds++
+		common.PipelineInfo(ctx, "Agent", "wait_round_uncounted", map[string]interface{}{
+			"round": round,
+			"waits": guards.waitRounds,
+		})
+		return iterOutcomeContinue, nil
+	}
+
 	return iterOutcomeNext, nil
+}
+
+// waitedWithoutResult reports whether every tool call of the round was a
+// wait_agent that timed out without delivering an event. Such a round learned
+// nothing and must not consume the iteration budget.
+func waitedWithoutResult(step types.AgentStep) bool {
+	if len(step.ToolCalls) == 0 {
+		return false
+	}
+	for _, call := range step.ToolCalls {
+		if call.Name != agenttools.ToolWaitAgent || call.Result == nil || !call.Result.Success {
+			return false
+		}
+		var out struct {
+			Updated     bool `json:"updated"`
+			TimedOut    bool `json:"timed_out"`
+			Interrupted bool `json:"interrupted"`
+		}
+		if json.Unmarshal([]byte(call.Result.Output), &out) != nil {
+			return false
+		}
+		if out.Updated || out.Interrupted || !out.TimedOut {
+			return false
+		}
+	}
+	return true
 }
 
 // runRoundTools executes the round's tool calls and reports whether the run

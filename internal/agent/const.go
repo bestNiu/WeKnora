@@ -77,6 +77,12 @@ const (
 	// model is told to re-issue the call, writes an even longer one, and hits
 	// the cap again. Without this the turn burns its whole round budget.
 	maxConsecutiveLengthRounds = 3
+
+	// maxWaitRounds caps how many rounds a parent may spend on a timed-out
+	// wait_agent without those rounds counting against MaxIterations. Each wait
+	// is at most 60s, so the cap (10) also bounds a parent's total dead time at
+	// about ten minutes before waiting starts consuming the real budget again.
+	maxWaitRounds = 10
 )
 
 // truncatedAnswerFallback is delivered when every attempt at this turn was cut

@@ -143,6 +143,23 @@ func TestCollaborationRegistrationOnlyOffersRootSixAndChildMessage(t *testing.T)
 		{"assistant", &types.AgentConfig{OperationsAgentID: types.BuiltinWeKnoraAssistantID}, 6},
 		{"ordinary", &types.AgentConfig{}, 6},
 		{
+			// A retrieval-only allowlist never opted into delegation, so the
+			// runtime must not hand it spawn_agent/wait_agent: that is how a
+			// document-search agent ends up spending its round budget waiting.
+			"retrieval_only",
+			&types.AgentConfig{AllowedTools: []string{
+				tools.ToolSearchKnowledge, tools.ToolReadDocument, tools.ToolListDocuments,
+			}},
+			0,
+		},
+		{
+			"opted_in",
+			&types.AgentConfig{AllowedTools: []string{
+				tools.ToolSearchKnowledge, tools.ToolSpawnAgent,
+			}},
+			6,
+		},
+		{
 			"shared",
 			&types.AgentConfig{
 				OperationsAgentID:   types.BuiltinWeKnoraAssistantID,
