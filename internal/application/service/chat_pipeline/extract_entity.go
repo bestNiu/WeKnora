@@ -430,7 +430,6 @@ func (f *Formater) formatExtraction(nodes []*types.GraphNode, relations []*types
 	return formatted, nil
 }
 
-
 // trailingCommaRE matches a comma directly before a closing bracket, the most
 // common defect when the model writes a long array of entities.
 var trailingCommaRE = regexp.MustCompile(`,\s*([}\]])`)

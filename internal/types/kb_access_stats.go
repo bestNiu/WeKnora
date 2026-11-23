@@ -89,6 +89,7 @@ type KBDownloadDecision struct {
 	DownloadsToday int
 	DailyLimit     int
 }
+
 // KBMemberTag labels one member on one knowledge base. Labels are free-form and
 // operator-assigned: they exist so a long member list can be filtered and
 // granted in bulk.

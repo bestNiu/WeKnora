@@ -66,3 +66,6 @@ miniprogram/project.private.config.json
 wecom-mapping.csv
 wecom-roster.csv
 roster-import.sql
+
+# 本地打补丁的二进制，勿提交
+WeKnora-patched

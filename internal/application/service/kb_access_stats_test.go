@@ -206,6 +206,7 @@ func TestAuthorizeDownloadInertWhenLimitsDisabled(t *testing.T) {
 }
 
 var _ interfaces.KBAccessStatsRepository = (*kbStatsRepo)(nil)
+
 // A batch download is charged per document: pulling 200 files must not cost the
 // same as pulling one, or the daily cap would be trivially bypassed.
 func TestAuthorizeDownloadChargesBatchUnits(t *testing.T) {
