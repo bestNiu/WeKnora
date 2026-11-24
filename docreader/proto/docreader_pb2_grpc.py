@@ -59,6 +59,11 @@ class DocReaderStub(object):
                 request_serializer=docreader__pb2.RenderRequest.SerializeToString,
                 response_deserializer=docreader__pb2.RenderResponse.FromString,
                 _registered_method=True)
+        self.GetInfo = channel.unary_unary(
+                '/docreader.DocReader/GetInfo',
+                request_serializer=docreader__pb2.GetInfoRequest.SerializeToString,
+                response_deserializer=docreader__pb2.GetInfoResponse.FromString,
+                _registered_method=True)
 
 
 class DocReaderServicer(object):
@@ -75,8 +80,9 @@ class DocReaderServicer(object):
         ReadStreamResponse carrying the parse metadata (markdown / metadata /
         error), then emits one message per image. This keeps every gRPC message
         small so large scanned PDFs (hundreds of page images, far exceeding the
-        unary message-size cap) can be returned without RESOURCE_EXHAUSTED and
-        with bounded memory on both ends.
+        unary message-size cap) can be returned without RESOURCE_EXHAUSTED. Parsers
+        that support incremental images can render and send a bounded number of
+        pages at a time instead of retaining the full image set in the server.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -102,9 +108,17 @@ class DocReaderServicer(object):
 
     def Render(self, request, context):
         """Render converts an Office document to PDF for the in-app preview.
+
         The PDF is a derived artifact: the original file stays behind the
         knowledge-base download permission, so the preview surface never needs to
         ship the source bytes.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetInfo(self, request, context):
+        """GetInfo reports the build identity of the running docreader instance.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -137,6 +151,11 @@ def add_DocReaderServicer_to_server(servicer, server):
                     servicer.Render,
                     request_deserializer=docreader__pb2.RenderRequest.FromString,
                     response_serializer=docreader__pb2.RenderResponse.SerializeToString,
+            ),
+            'GetInfo': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetInfo,
+                    request_deserializer=docreader__pb2.GetInfoRequest.FromString,
+                    response_serializer=docreader__pb2.GetInfoResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -274,6 +293,33 @@ class DocReader(object):
             '/docreader.DocReader/Render',
             docreader__pb2.RenderRequest.SerializeToString,
             docreader__pb2.RenderResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetInfo(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/docreader.DocReader/GetInfo',
+            docreader__pb2.GetInfoRequest.SerializeToString,
+            docreader__pb2.GetInfoResponse.FromString,
             options,
             channel_credentials,
             insecure,

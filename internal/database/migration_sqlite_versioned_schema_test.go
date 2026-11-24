@@ -49,6 +49,7 @@ var versionedSQLiteTables = []string{
 	"sandbox_user_machines",
 	"kb_user_access",
 	"knowledge_preview_artifacts",
+	"credential_vault_items",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -91,7 +92,10 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 52
+// 59 = max(migrations/sqlite/*.up.sql) after resolving the 51-53 / 134-137
+// version collision between upstream and this fork (fork block shifted to
+// run after upstream's).
+const expectedSQLiteMigrationVersion = 59
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -315,9 +319,11 @@ func TestSQLiteKBUserAccessMigrationRollsBack(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = m.Close() })
 
-	require.NoError(t, m.Migrate(50))
+	// kb_user_access lives at 000054 after the fork block was shifted past
+	// upstream's 000051-000053, so roll back to 53 and forward to 54.
+	require.NoError(t, m.Migrate(53))
 	version, dirty := sqliteMigrationState(t, sqlDB)
-	require.Equal(t, 50, version)
+	require.Equal(t, 53, version)
 	require.False(t, dirty)
 	require.False(t, sqliteTableExists(t, sqlDB, "kb_user_access"), "down must drop the grant table")
 	require.False(t, sqliteColumnExists(t, sqlDB, "knowledge_bases", "visibility_mode"))
@@ -325,9 +331,9 @@ func TestSQLiteKBUserAccessMigrationRollsBack(t *testing.T) {
 	require.False(t, sqliteColumnExists(t, sqlDB, "im_channels", "owner_user_id"))
 	require.False(t, sqliteColumnExists(t, sqlDB, "embed_channels", "owner_user_id"))
 
-	require.NoError(t, m.Migrate(51))
+	require.NoError(t, m.Migrate(54))
 	version, dirty = sqliteMigrationState(t, sqlDB)
-	require.Equal(t, 51, version)
+	require.Equal(t, 54, version)
 	require.False(t, dirty)
 	require.True(t, sqliteTableExists(t, sqlDB, "kb_user_access"))
 	require.True(t, sqliteColumnExists(t, sqlDB, "knowledge_bases", "visibility_mode"))

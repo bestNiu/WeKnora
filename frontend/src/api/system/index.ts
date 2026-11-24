@@ -30,6 +30,8 @@ export interface SystemInfo {
   commit_id?: string
   build_time?: string
   go_version?: string
+  docreader_version?: string
+  docreader_commit_id?: string
   keyword_index_engine?: string
   vector_store_engine?: string
   graph_database_engine?: string
@@ -122,6 +124,7 @@ export interface ParserEngineConfig {
   mineru_tier?: string // flash / basic / standard / advanced，空为服务端默认
   // 以下仅对 MinerU 3.x 及更早版本生效
   mineru_model?: string
+  mineru_effort?: 'medium' | 'high' | ''
   mineru_vlm_server_url?: string
   mineru_enable_formula?: boolean | null
   mineru_enable_table?: boolean | null
@@ -358,12 +361,15 @@ export interface ListAllUsersResponse {
 
 /**
  * List every platform user across tenants (SystemAdmin only, paginated).
+ * Optional `q` filters by username or email on the server across all pages.
  * Returns {users, offset, limit, has_more} directly (no data wrapping).
  */
 export async function listAllUsers(
-  params?: { offset?: number; limit?: number },
+  params?: { offset?: number; limit?: number; q?: string },
 ): Promise<ListAllUsersResponse> {
   const qs = new URLSearchParams()
+  const q = params?.q?.trim()
+  if (q) qs.set('q', q)
   if (params?.offset != null) qs.set('offset', String(params.offset))
   if (params?.limit != null) qs.set('limit', String(params.limit))
   const suffix = qs.toString() ? `?${qs.toString()}` : ''
@@ -531,7 +537,7 @@ export interface ApplyDefaultStorageQuotaResult {
 }
 
 /**
- * Apply the current `tenant.default_storage_quota_gb` setting to every
+ * Apply the effective MB/GB default storage quota to every
  * existing tenant. Reads the resolved setting server-side (DB > ENV >
  * default), then writes that quota to every row. SystemAdmin only.
  *

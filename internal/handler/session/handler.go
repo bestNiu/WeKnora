@@ -82,6 +82,8 @@ type Handler struct {
 	stopCollaboration func(context.Context, string, string) error
 	delegatedPrompt   func(context.Context, *types.AgentPrompt) bool
 	background        *service.BackgroundWork
+	// hostModes switches the Lite host approval mode. Nil outside Lite.
+	hostModes HostApprovalModes
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -120,6 +122,7 @@ func NewHandler(
 	rewindService *service.SessionRewindService,
 	approvedProjectDirs HostProjectDirsLoader,
 	backgroundWork *service.BackgroundWork,
+	hostModes HostApprovalModes,
 ) *Handler {
 	h := &Handler{
 		browserSkill:          browserSkill,
@@ -152,6 +155,7 @@ func NewHandler(
 		redis:                 rdb,
 		approvedProjectDirs:   approvedProjectDirs,
 		background:            backgroundWork,
+		hostModes:             hostModes,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

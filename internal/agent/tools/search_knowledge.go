@@ -414,19 +414,26 @@ func (t *SearchKnowledgeTool) formatWithinBudget(
 	query, mode string,
 ) (*types.ToolResult, int) {
 	budget := OutputBudget(ctx) * 4 / 5
-	kept := results
-	result := t.formatOutput(ctx, kept, kbIDs, query, mode)
-	for len(kept) > 1 {
-		size := utf8.RuneCountInString(result.Output)
-		if size <= budget {
-			break
-		}
-		// Shrink in proportion to the overshoot, at least one row per round.
-		n := min(len(kept)-1, max(1, len(kept)*budget/size))
-		kept = kept[:n]
-		result = t.formatOutput(ctx, kept, kbIDs, query, mode)
+	result := t.formatOutput(ctx, results, kbIDs, query, mode)
+	if len(results) <= 1 || utf8.RuneCountInString(result.Output) <= budget {
+		return result, 0
 	}
-	return result, len(results) - len(kept)
+
+	// Each added row increases the rendered size. Search for the longest
+	// ranked prefix that fits, keeping the first row even if it is oversized.
+	best := 1
+	result = t.formatOutput(ctx, results[:best], kbIDs, query, mode)
+	for low, high := 2, len(results)-1; low <= high; {
+		mid := low + (high-low)/2
+		candidate := t.formatOutput(ctx, results[:mid], kbIDs, query, mode)
+		if utf8.RuneCountInString(candidate.Output) <= budget {
+			best, result = mid, candidate
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+	return result, len(results) - best
 }
 
 // emptySearchStatement describes an empty result, including any mode
@@ -571,9 +578,9 @@ func (t *SearchKnowledgeTool) retrievalParams(limit int) (topK int, vectorThresh
 }
 
 // concurrentSearchByTargets executes retrieval using pre-computed search targets.
-// Targets sharing the same underlying embedding model (identified by model name + endpoint)
-// are grouped so the query embedding is computed once per model, and all
-// full-KB targets in a group are combined into a single retrieval call.
+// Targets sharing the same model name, endpoint and configured vector dimension
+// are grouped so each group computes one query embedding and combines all
+// full-KB targets into a single retrieval call.
 func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	ctx context.Context,
 	query string,
@@ -620,7 +627,8 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	}
 	searchTargets = filteredTargets
 
-	// Resolve actual model identities (name + endpoint) for cross-tenant grouping
+	// Resolve actual model identities (name + endpoint + configured dimension)
+	// for cross-tenant grouping
 	modelKeyMap := t.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
 
 	groups := make(map[string][]*types.SearchTarget)
@@ -857,6 +865,14 @@ func (t *SearchKnowledgeTool) rerankResults(
 	}
 	if t.knowledgeBaseService != nil {
 		opts.LoadImage = t.knowledgeBaseService.ReadChunkImage
+		if ids := types.SearchResultKnowledgeBaseIDs(rows); len(ids) > 0 {
+			kbs, err := t.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, ids)
+			if err != nil {
+				logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to read question generation config: %v", err)
+			} else {
+				types.ApplySkipGeneratedQuestions(rows, types.QuestionGenerationOffIDs(kbs))
+			}
+		}
 	}
 	res := reranking.Rerank(ctx, t.rerankModel, query, rows, opts)
 	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {

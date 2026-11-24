@@ -89,8 +89,11 @@ func TestWaitRoundsDoNotConsumeIterationBudget(t *testing.T) {
 // are bounded, after which waiting costs ordinary rounds again and the turn
 // ends through the normal max-iterations fallback rather than looping.
 func TestWaitRoundsAreCapped(t *testing.T) {
-	responses := make([]mockResponse, 0, maxWaitRounds+4)
-	for i := range maxWaitRounds + 3 {
+	// maxWaitRounds uncounted waits, then MaxIterations budgeted waits consume
+	// the model responses; the max-iterations fallback then asks for a
+	// synthesized answer, so the final response must carry visible text.
+	responses := make([]mockResponse, 0, maxWaitRounds+3)
+	for i := range maxWaitRounds + 2 {
 		responses = append(responses, waitCallResponse(fmt.Sprintf("w%d", i)))
 	}
 	responses = append(responses, answerResponse("fallback"))
