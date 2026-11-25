@@ -95,7 +95,7 @@ func TestSQLiteIMSessionModeRollbackPreservesData(t *testing.T) {
 			if conflicting {
 				insertIMMapping(t, db, "thread", "alice", "topic", "agent-1", false)
 			}
-			down, err := os.ReadFile(filepath.Join(root, "migrations/sqlite/000053_im_session_mode_indexes.down.sql"))
+			down, err := os.ReadFile(filepath.Join(root, "migrations/sqlite/000059_im_session_mode_indexes.down.sql"))
 			require.NoError(t, err)
 			driver, err := sqlitemigrate.WithInstance(db, &sqlitemigrate.Config{})
 			require.NoError(t, err)
@@ -118,7 +118,7 @@ func TestSQLiteIMSessionModeRollbackPreservesData(t *testing.T) {
 
 func assertIMMappingConstraintsAfterReupgrade(t *testing.T, db *sql.DB, root string) {
 	t.Helper()
-	up, err := os.ReadFile(filepath.Join(root, "migrations/sqlite/000053_im_session_mode_indexes.up.sql"))
+	up, err := os.ReadFile(filepath.Join(root, "migrations/sqlite/000059_im_session_mode_indexes.up.sql"))
 	require.NoError(t, err)
 	driver, err := sqlitemigrate.WithInstance(db, &sqlitemigrate.Config{})
 	require.NoError(t, err)

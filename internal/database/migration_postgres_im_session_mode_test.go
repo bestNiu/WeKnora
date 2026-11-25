@@ -44,7 +44,7 @@ func TestPostgresIMSessionModeIndexes(t *testing.T) {
 	_, err = tx.Exec(`INSERT INTO im_channel_sessions VALUES
 		('legacy', 'feishu', 'alice', 'group', 1, 'agent-1', '', NULL)`)
 	require.NoError(t, err)
-	require.NoError(t, run("000137_im_session_mode_indexes.up.sql"))
+	require.NoError(t, run("000143_im_session_mode_indexes.up.sql"))
 	_, err = tx.Exec(`INSERT INTO im_channel_sessions VALUES
 		('topic-1', 'feishu', 'alice', 'group', 1, 'agent-1', 'thread-1', NULL),
 		('topic-2', 'feishu', 'alice', 'group', 1, 'agent-1', 'thread-2', NULL),
@@ -67,7 +67,7 @@ func TestPostgresIMSessionModeIndexes(t *testing.T) {
 	}
 	_, err = tx.Exec("SAVEPOINT incompatible_down")
 	require.NoError(t, err)
-	require.ErrorContains(t, run("000137_im_session_mode_indexes.down.sql"), "idx_channel_lookup")
+	require.ErrorContains(t, run("000143_im_session_mode_indexes.down.sql"), "idx_channel_lookup")
 	_, err = tx.Exec("ROLLBACK TO SAVEPOINT incompatible_down")
 	require.NoError(t, err)
 	var count int
@@ -76,8 +76,8 @@ func TestPostgresIMSessionModeIndexes(t *testing.T) {
 	// With compatible data, down and up both work and preserve the old row.
 	_, err = tx.Exec("DELETE FROM im_channel_sessions WHERE id != 'legacy'")
 	require.NoError(t, err)
-	require.NoError(t, run("000137_im_session_mode_indexes.down.sql"))
-	require.NoError(t, run("000137_im_session_mode_indexes.up.sql"))
+	require.NoError(t, run("000143_im_session_mode_indexes.down.sql"))
+	require.NoError(t, run("000143_im_session_mode_indexes.up.sql"))
 	require.NoError(t, tx.QueryRow("SELECT count(*) FROM im_channel_sessions WHERE id = 'legacy'").Scan(&count))
 	require.Equal(t, 1, count)
 }

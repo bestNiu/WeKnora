@@ -93,8 +93,9 @@ var versionedSQLiteColumns = map[string][]string{
 }
 
 // 59 = max(migrations/sqlite/*.up.sql) after resolving the 51-53 / 134-137
-// version collision between upstream and this fork (fork block shifted to
-// run after upstream's).
+// version collision between upstream and this fork. The fork block keeps its
+// deployed numbers (51-56) and upstream's new migrations are placed above it
+// (57-59) so already-deployed fork databases upgrade without a shim.
 const expectedSQLiteMigrationVersion = 59
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
@@ -319,11 +320,12 @@ func TestSQLiteKBUserAccessMigrationRollsBack(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = m.Close() })
 
-	// kb_user_access lives at 000054 after the fork block was shifted past
-	// upstream's 000051-000053, so roll back to 53 and forward to 54.
-	require.NoError(t, m.Migrate(53))
+	// kb_user_access keeps the fork's original 000051 slot: fork deployments
+	// already applied it under that number, so the merged tree moves upstream's
+	// new migrations above the fork block rather than the reverse.
+	require.NoError(t, m.Migrate(50))
 	version, dirty := sqliteMigrationState(t, sqlDB)
-	require.Equal(t, 53, version)
+	require.Equal(t, 50, version)
 	require.False(t, dirty)
 	require.False(t, sqliteTableExists(t, sqlDB, "kb_user_access"), "down must drop the grant table")
 	require.False(t, sqliteColumnExists(t, sqlDB, "knowledge_bases", "visibility_mode"))
@@ -331,9 +333,9 @@ func TestSQLiteKBUserAccessMigrationRollsBack(t *testing.T) {
 	require.False(t, sqliteColumnExists(t, sqlDB, "im_channels", "owner_user_id"))
 	require.False(t, sqliteColumnExists(t, sqlDB, "embed_channels", "owner_user_id"))
 
-	require.NoError(t, m.Migrate(54))
+	require.NoError(t, m.Migrate(51))
 	version, dirty = sqliteMigrationState(t, sqlDB)
-	require.Equal(t, 54, version)
+	require.Equal(t, 51, version)
 	require.False(t, dirty)
 	require.True(t, sqliteTableExists(t, sqlDB, "kb_user_access"))
 	require.True(t, sqliteColumnExists(t, sqlDB, "knowledge_bases", "visibility_mode"))
