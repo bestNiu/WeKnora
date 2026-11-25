@@ -51,7 +51,7 @@ interface StreamOptions {
   // 请求头
   headers?: Record<string, string>
   // 请求体自动序列化
-  body?: Record<string, any>
+  body?: Record<string, unknown>
   // 流式渲染间隔 (ms)
   chunkInterval?: number
 }

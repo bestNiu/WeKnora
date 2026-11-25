@@ -91,7 +91,7 @@ export interface Resource {
   parent_id?: string
   has_children?: boolean
   /** Connector-specific hints, e.g. Confluence Cloud's top-level-container limitation. */
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 }
 
 // --- API calls ---
@@ -125,7 +125,7 @@ export function validateConnection(id: string) {
 }
 
 // Validate credentials without persisting (during creation or credential replacement).
-export function validateCredentials(type: string, credentials: Record<string, any>) {
+export function validateCredentials(type: string, credentials: Record<string, unknown>) {
   return post('/api/v1/datasource/validate-credentials', { type, credentials })
 }
 
