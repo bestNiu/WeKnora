@@ -108,7 +108,6 @@ class DocReaderServicer(object):
 
     def Render(self, request, context):
         """Render converts an Office document to PDF for the in-app preview.
-
         The PDF is a derived artifact: the original file stays behind the
         knowledge-base download permission, so the preview surface never needs to
         ship the source bytes.
