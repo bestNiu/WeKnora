@@ -77,6 +77,10 @@ var searchKnowledgeTool = BaseTool{
       "items": { "type": "string" },
       "maxItems": 10
     },
+    "folder": {
+      "type": "string",
+      "description": "Optional folder path from list_documents' folder tree, or a folder name such as \"乳腺癌\"; restricts retrieval to that folder and its subfolders"
+    },
     "limit": {
       "type": "integer",
       "description": "Maximum chunks to return (default 10, max 30)",
@@ -93,6 +97,7 @@ type SearchKnowledgeInput struct {
 	Query            string   `json:"query"`
 	Mode             string   `json:"mode,omitempty"`
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
+	Folder           string   `json:"folder,omitempty"`
 	Limit            int      `json:"limit,omitempty"`
 }
 
@@ -227,6 +232,28 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		}, fmt.Errorf("no search targets available")
 	}
 
+	// Optional folder scope. It is resolved to the documents stored in that
+	// folder subtree and pinned on a copy of every target, so retrieval never
+	// ranks chunks outside the folder it was asked about.
+	folder := types.NormalizeKnowledgeFolderPath(input.Folder)
+	if folder != "" {
+		scoped, canonical, folderDocs, hint, err := t.scopeTargetsToFolder(ctx, searchTargets, folder)
+		if err != nil {
+			return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to resolve folder: %v", err)}, err
+		}
+		folder = canonical
+		if len(scoped) == 0 || folderDocs == 0 {
+			msg := fmt.Sprintf("No documents in folder %q.", folder)
+			if paths := folderHint(hint); paths != "" {
+				msg += " Available folders: " + paths + "."
+			}
+			return &types.ToolResult{Success: true, Output: msg, Data: map[string]interface{}{
+				"folder": folder, "total_docs": 0,
+			}}, nil
+		}
+		searchTargets = scoped
+	}
+
 	kbIDs := searchTargets.GetAllKnowledgeBaseIDs()
 	kbList, err := t.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDs)
 	if err != nil {
@@ -330,6 +357,9 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	result, omitted := t.formatWithinBudget(ctx, final, kbIDs, query, mode)
+	if folder != "" {
+		result.Data["folder"] = folder
+	}
 	if omitted > 0 {
 		result.Data["omitted_for_budget"] = omitted
 	}
@@ -824,6 +854,96 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	}
 	wg.Wait()
 	return allResults, failures, calls, embedFallbacks
+}
+
+// scopeTargetsToFolder resolves a folder term once per knowledge base and
+// pins the folder's document IDs on a copy of each search target. Targets that
+// already carry a document scope are intersected with it, so a user-pinned
+// @file selection still wins. It returns the canonical folder path, how many
+// distinct documents the folder holds, and the folder rows for a hint.
+func (t *SearchKnowledgeTool) scopeTargetsToFolder(
+	ctx context.Context, targets types.SearchTargets, raw string,
+) (types.SearchTargets, string, int, []knowledgeFolderRow, error) {
+	out := make(types.SearchTargets, 0, len(targets))
+	canonical := ""
+	var hint []knowledgeFolderRow
+	seen := make(map[string]struct{})
+	for _, st := range targets {
+		if st == nil || st.KnowledgeBaseID == "" {
+			continue
+		}
+		listCtx := contextForKB(ctx, t.searchTargets, st.KnowledgeBaseID)
+		path := types.NormalizeKnowledgeFolderPath(raw)
+		var rows []knowledgeFolderRow
+		if t.knowledgeService != nil {
+			if _, ok := types.TenantIDFromContext(listCtx); ok {
+				tree, err := t.knowledgeService.ListKnowledgeFolderTree(listCtx, st.KnowledgeBaseID)
+				if err != nil {
+					return nil, path, 0, nil, err
+				}
+				path, rows = resolveKnowledgeFolder(tree, raw)
+			}
+		}
+		if path == "" {
+			continue
+		}
+		canonical = path
+		if hint == nil && len(rows) > 0 {
+			hint = rows
+		}
+		ids, err := t.knowledgeIDsInFolder(listCtx, st.KnowledgeBaseID, path)
+		if err != nil {
+			return nil, path, 0, hint, err
+		}
+		if len(st.KnowledgeIDs) > 0 {
+			ids = intersectStrings(st.KnowledgeIDs, ids)
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		clone := *st
+		clone.Type = types.SearchTargetTypeKnowledge
+		clone.KnowledgeIDs = ids
+		out = append(out, &clone)
+		for _, id := range ids {
+			seen[id] = struct{}{}
+		}
+	}
+	return out, canonical, len(seen), hint, nil
+}
+
+// knowledgeIDsInFolder pages through the documents stored in a folder subtree.
+// It only reads IDs, and the folder predicate is pushed into the query, so the
+// cost is proportional to the folder size, not the knowledge base size.
+func (t *SearchKnowledgeTool) knowledgeIDsInFolder(
+	ctx context.Context, kbID, folder string,
+) ([]string, error) {
+	if t.knowledgeService == nil {
+		return nil, nil
+	}
+	ids := make([]string, 0, 64)
+	for page := 1; page <= folderIDMaxPages; page++ {
+		result, err := t.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(
+			ctx, kbID, &types.Pagination{Page: page, PageSize: folderIDPageSize},
+			types.KnowledgeListFilter{FolderPath: folder, FolderScope: types.FolderScopeSubtree},
+		)
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			break
+		}
+		rows, _ := result.Data.([]*types.Knowledge)
+		for _, k := range rows {
+			if k != nil {
+				ids = append(ids, k.ID)
+			}
+		}
+		if int64(page*folderIDPageSize) >= result.Total {
+			break
+		}
+	}
+	return ids, nil
 }
 
 // rerankResults scores all search results (including FAQ entries) with the

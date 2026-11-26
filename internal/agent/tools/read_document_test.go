@@ -102,6 +102,19 @@ func (f *readDocKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
 		return &types.PageResult{Page: page.Page, PageSize: page.PageSize, Data: []*types.Knowledge{}}, nil
 	}
 	rows, _ := result.Data.([]*types.Knowledge)
+	if filter.FolderScope != types.FolderScopeAny && filter.FolderPath != "" {
+		inFolder := make([]*types.Knowledge, 0, len(rows))
+		for _, k := range rows {
+			match := k.FolderPath == filter.FolderPath
+			if filter.FolderScope == types.FolderScopeSubtree {
+				match = match || strings.HasPrefix(k.FolderPath, filter.FolderPath+"/")
+			}
+			if match {
+				inFolder = append(inFolder, k)
+			}
+		}
+		rows = inFolder
+	}
 	if len(filter.TagIDs) > 0 {
 		wanted := make(map[string]bool, len(filter.TagIDs))
 		for _, id := range filter.TagIDs {
@@ -137,6 +150,25 @@ func (f *readDocKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
 		end = len(rows)
 	}
 	return &types.PageResult{Total: total, Page: page.Page, PageSize: page.PageSize, Data: rows[start:end]}, nil
+}
+
+func (f *readDocKnowledgeService) ListKnowledgeFolderTree(
+	_ context.Context, kbID string,
+) (*types.KnowledgeFolderTree, error) {
+	result, ok := f.pages[kbID]
+	if !ok {
+		return types.BuildKnowledgeFolderTree(nil), nil
+	}
+	rows, _ := result.Data.([]*types.Knowledge)
+	counts := make(map[string]int64, len(rows))
+	for _, k := range rows {
+		counts[k.FolderPath]++
+	}
+	list := make([]*types.KnowledgeFolderCount, 0, len(counts))
+	for path, count := range counts {
+		list = append(list, &types.KnowledgeFolderCount{FolderPath: path, Count: count})
+	}
+	return types.BuildKnowledgeFolderTree(list), nil
 }
 
 type readDocChunkRepo struct {

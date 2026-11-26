@@ -17,6 +17,7 @@ type stubKnowledgeBaseService struct {
 	results       []*types.SearchResult
 	err           error
 	getKBPanicIDs map[string]bool
+	lastParams    types.SearchParams
 }
 
 func (s *stubKnowledgeBaseService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
@@ -71,7 +72,10 @@ func (s *stubKnowledgeBaseService) TogglePinKnowledgeBase(context.Context, strin
 	return nil, nil
 }
 
-func (s *stubKnowledgeBaseService) HybridSearch(context.Context, string, types.SearchParams) ([]*types.SearchResult, error) {
+func (s *stubKnowledgeBaseService) HybridSearch(
+	_ context.Context, _ string, params types.SearchParams,
+) ([]*types.SearchResult, error) {
+	s.lastParams = params
 	return s.results, s.err
 }
 

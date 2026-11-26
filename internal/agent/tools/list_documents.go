@@ -21,7 +21,9 @@ var listDocumentsTool = BaseTool{
 	description: "List the documents inside one knowledge base, newest first, with pagination and an optional " +
 		"title filter.\nUse it to see what a knowledge base contains or to find a document by name; each entry " +
 		"carries the doc://N handle that read_document accepts. When you list documents for the user, link " +
-		"each one as [title](doc://N) with that exact handle so the reader can open it.",
+		"each one as [title](doc://N) with that exact handle so the reader can open it.\n" +
+		"Pass include_folders=true on the first page to see the folder tree with document counts; pass folder " +
+		"with a path or a folder name (e.g. \"乳腺癌\") to list only that folder and its subfolders.",
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -33,6 +35,14 @@ var listDocumentsTool = BaseTool{
     "keyword": {
       "type": "string",
       "description": "Optional substring to match against document titles and file names"
+    },
+    "folder": {
+      "type": "string",
+      "description": "Optional folder path from the folder tree, or a folder name such as \"乳腺癌\"; includes its subfolders"
+    },
+    "include_folders": {
+      "type": "boolean",
+      "description": "Include the folder tree with document counts (page 1 only)"
     },
     "page": {
       "type": "integer",
@@ -54,6 +64,8 @@ var listDocumentsTool = BaseTool{
 type ListDocumentsInput struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Keyword         string `json:"keyword,omitempty"`
+	Folder          string `json:"folder,omitempty"`
+	IncludeFolders  bool   `json:"include_folders,omitempty"`
 	Page            int    `json:"page,omitempty"`
 	PageSize        int    `json:"page_size,omitempty"`
 }
@@ -107,24 +119,38 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 		pageSize = listDocumentsMaxPageSize
 	}
 	keyword := strings.TrimSpace(input.Keyword)
+	folder, folderRows, err := t.resolveFolder(ctx, kbID, input.Folder, input.IncludeFolders && page == 1)
+	if err != nil {
+		return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to resolve folder: %v", err)}, err
+	}
 
-	filtered, total, err := t.listScoped(ctx, kbID, keyword, page, pageSize)
+	filtered, total, err := t.listScoped(ctx, kbID, keyword, folder, page, pageSize)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to list documents: %v", err)}, err
 	}
 
 	documents := make([]map[string]interface{}, 0, len(filtered))
 	var b strings.Builder
+	includeFolders := input.IncludeFolders && page == 1
+	if includeFolders {
+		b.WriteString(renderFolderTree(folderRows))
+	}
 	fmt.Fprintf(&b, "<documents knowledge_base_id=\"%s\" total=\"%d\" page=\"%d\" page_size=\"%d\"",
 		xmlEscape(kbID), total, page, pageSize)
 	if keyword != "" {
 		fmt.Fprintf(&b, " keyword=\"%s\"", xmlEscape(keyword))
+	}
+	if folder != "" {
+		fmt.Fprintf(&b, " folder=\"%s\"", xmlEscape(folder))
 	}
 	b.WriteString(">\n")
 	for _, k := range filtered {
 		fmt.Fprintf(&b, "<document knowledge_id=\"%s\" title=\"%s\"", xmlEscape(k.ID), xmlEscape(k.Title))
 		if k.FileType != "" {
 			fmt.Fprintf(&b, " file_type=\"%s\"", xmlEscape(k.FileType))
+		}
+		if k.FolderPath != "" {
+			fmt.Fprintf(&b, " folder=\"%s\"", xmlEscape(k.FolderPath))
 		}
 		// App URL for the document (drawer + preview). A relative link survives the
 		// chat sanitizer, opens in a new tab, and lands on the KB page with this
@@ -153,6 +179,7 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 			"file_name":    k.FileName,
 			"file_type":    k.FileType,
 			"file_size":    k.FileSize,
+			"folder_path":  k.FolderPath,
 			"parse_status": k.ParseStatus,
 			"is_faq":       false,
 		}
@@ -174,18 +201,69 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 	if keyword != "" {
 		data["keyword"] = keyword
 	}
+	if folder != "" {
+		data["folder"] = folder
+	}
+	if includeFolders {
+		data["folders"] = folderRows
+	}
 	if int64(page*pageSize) < total {
 		data["next_page"] = page + 1
 	}
 	output := b.String()
 	if len(filtered) == 0 {
-		if keyword != "" {
+		switch {
+		case folder != "" && keyword != "":
+			output = fmt.Sprintf("No documents matching %q in folder %q.", keyword, folder)
+		case folder != "":
+			output = fmt.Sprintf("No documents in folder %q.", folder)
+		case keyword != "":
 			output = fmt.Sprintf("No documents matching %q in knowledge base %s.", keyword, kbID)
-		} else if total == 0 {
+		case total == 0:
 			output = fmt.Sprintf("Knowledge base %s has no documents.", kbID)
+		}
+		if hint := folderHint(folderRows); hint != "" {
+			output += " Available folders: " + hint + "."
 		}
 	}
 	return &types.ToolResult{Success: true, Output: output, Data: data}, nil
+}
+
+// resolveFolder maps the model's folder argument onto a canonical folder path
+// and also loads the folder tree for hints/rendering. An empty argument means
+// the whole knowledge base and returns the tree only when it was asked for.
+func (t *ListDocumentsTool) resolveFolder(
+	ctx context.Context, kbID, raw string, needTree bool,
+) (string, []knowledgeFolderRow, error) {
+	if strings.TrimSpace(raw) == "" && !needTree {
+		return "", nil, nil
+	}
+	listCtx := contextForKB(ctx, t.searchTargets, kbID)
+	if _, ok := types.TenantIDFromContext(listCtx); !ok {
+		return types.NormalizeKnowledgeFolderPath(raw), nil, nil
+	}
+	tree, err := t.knowledgeService.ListKnowledgeFolderTree(listCtx, kbID)
+	if err != nil {
+		return "", nil, err
+	}
+	path, rows := resolveKnowledgeFolder(tree, raw)
+	return path, rows, nil
+}
+
+// renderFolderTree renders the folder projection the model uses to choose a
+// folder. It is emitted once, before the first page of documents.
+func renderFolderTree(rows []knowledgeFolderRow) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "<folders total=\"%d\">\n", len(rows))
+	for _, row := range rows {
+		fmt.Fprintf(&b, "<folder path=\"%s\" name=\"%s\" direct=\"%d\" total=\"%d\" />\n",
+			xmlEscape(row.Path), xmlEscape(row.Name), row.Direct, row.Total)
+	}
+	b.WriteString("</folders>\n")
+	return b.String()
 }
 
 // listDocumentsScopeCap bounds how many tagged documents are loaded when a
@@ -199,15 +277,13 @@ const listDocumentsScopeCap = 1000
 // after paging would report totals for the whole base and leave holes in the
 // page.
 func (t *ListDocumentsTool) listScoped(
-	ctx context.Context, kbID, keyword string, page, pageSize int,
+	ctx context.Context, kbID, keyword, folder string, page, pageSize int,
 ) ([]*types.Knowledge, int64, error) {
 	tenantID := t.searchTargets.GetTenantIDForKB(kbID)
 	// Documents live under the knowledge base owner, which may differ from the
 	// caller's tenant for organization-shared bases.
-	listCtx := ctx
-	if tenantID != 0 {
-		listCtx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
-	}
+	listCtx := contextForKB(ctx, t.searchTargets, kbID)
+	folderFilter := types.KnowledgeListFilter{FolderPath: folder, FolderScope: types.FolderScopeSubtree}
 	listPage := func(filter types.KnowledgeListFilter, p, size int) ([]*types.Knowledge, int64, error) {
 		filter.Keyword = keyword
 		result, err := t.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(
@@ -226,7 +302,7 @@ func (t *ListDocumentsTool) listScoped(
 			continue
 		}
 		if searchTargetIsWholeKB(target) {
-			return listPage(types.KnowledgeListFilter{}, page, pageSize)
+			return listPage(folderFilter, page, pageSize)
 		}
 		ids, tags := searchTargetScope(target)
 		explicitIDs = append(explicitIDs, ids...)
@@ -239,7 +315,9 @@ func (t *ListDocumentsTool) listScoped(
 		if len(tagIDs) == 0 {
 			return nil, 0, nil
 		}
-		return listPage(types.KnowledgeListFilter{TagIDs: tagIDs}, page, pageSize)
+		filter := folderFilter
+		filter.TagIDs = tagIDs
+		return listPage(filter, page, pageSize)
 	}
 
 	// Explicit documents (plus any tagged ones) form a small union that is
@@ -250,12 +328,15 @@ func (t *ListDocumentsTool) listScoped(
 		return nil, 0, err
 	}
 	for _, k := range explicit {
-		if k != nil && k.KnowledgeBaseID == kbID && knowledgeMatchesKeyword(k, keyword) {
+		if k != nil && k.KnowledgeBaseID == kbID && knowledgeMatchesKeyword(k, keyword) &&
+			knowledgeInFolder(k.FolderPath, folder) {
 			union[k.ID] = k
 		}
 	}
 	if len(tagIDs) > 0 {
-		tagged, _, err := listPage(types.KnowledgeListFilter{TagIDs: tagIDs}, 1, listDocumentsScopeCap)
+		filter := folderFilter
+		filter.TagIDs = tagIDs
+		tagged, _, err := listPage(filter, 1, listDocumentsScopeCap)
 		if err != nil {
 			return nil, 0, err
 		}

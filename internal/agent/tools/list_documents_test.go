@@ -16,14 +16,17 @@ func newListDocumentsFixture() *ListDocumentsTool {
 		{
 			ID: "doc-a", KnowledgeBaseID: "kb-1", Title: "Alpha Guide", FileType: "pdf",
 			ParseStatus: "completed", UpdatedAt: updated, Description: "First",
+			FolderPath: "2. 常规临床试验方案/肿瘤方案/乳腺癌",
 		},
 		{
 			ID: "doc-b", KnowledgeBaseID: "kb-1", Title: "Beta Notes", FileType: "md",
 			ParseStatus: "completed", UpdatedAt: updated,
+			FolderPath: "2. 常规临床试验方案/肿瘤方案/乳腺癌",
 		},
 		{
 			ID: "doc-c", KnowledgeBaseID: "kb-1", Title: "Alpha Errata", FileType: "txt",
 			ParseStatus: "failed", UpdatedAt: updated,
+			FolderPath: "3. 募小助方案摘要",
 		},
 	}
 	service := &readDocKnowledgeService{
@@ -162,5 +165,68 @@ func TestListDocumentsUnionOfPinnedDocumentsAndTags(t *testing.T) {
 	}
 	if res.Data["total_docs"] != int64(2) {
 		t.Fatalf("union total = %+v", res.Data)
+	}
+}
+
+func TestListDocumentsIncludeFoldersRendersTree(t *testing.T) {
+	tool := newListDocumentsFixture()
+	res, err := tool.Execute(context.Background(),
+		json.RawMessage(`{"knowledge_base_id":"kb-1","page_size":1,"include_folders":true}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if !strings.Contains(res.Output, `<folders total="4">`) ||
+		!strings.Contains(res.Output, `path="2. 常规临床试验方案/肿瘤方案/乳腺癌"`) ||
+		!strings.Contains(res.Output, `total="2"`) {
+		t.Fatalf("folder tree = %s", res.Output)
+	}
+	folders, _ := res.Data["folders"].([]knowledgeFolderRow)
+	if len(folders) != 4 {
+		t.Fatalf("folders = %+v", res.Data["folders"])
+	}
+	// Page 2 must not repeat the tree: it only costs context.
+	res, _ = tool.Execute(context.Background(),
+		json.RawMessage(`{"knowledge_base_id":"kb-1","page":2,"include_folders":true}`))
+	if strings.Contains(res.Output, "<folders") {
+		t.Fatalf("folder tree must be emitted on page 1 only: %s", res.Output)
+	}
+}
+
+func TestListDocumentsFolderFilterResolvesNameAndSubtree(t *testing.T) {
+	tool := newListDocumentsFixture()
+	service := tool.knowledgeService.(*readDocKnowledgeService)
+
+	res, err := tool.Execute(context.Background(),
+		json.RawMessage(`{"knowledge_base_id":"kb-1","folder":"乳腺癌"}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	rows, _ := res.Data["documents"].([]map[string]interface{})
+	if len(rows) != 2 || res.Data["total_docs"] != int64(2) {
+		t.Fatalf("folder rows = %+v data=%+v", rows, res.Data)
+	}
+	if res.Data["folder"] != "2. 常规临床试验方案/肿瘤方案/乳腺癌" {
+		t.Fatalf("folder must resolve to its canonical path: %+v", res.Data["folder"])
+	}
+	last := service.listFilters[len(service.listFilters)-1]
+	if last.FolderScope != types.FolderScopeSubtree || last.FolderPath != "2. 常规临床试验方案/肿瘤方案/乳腺癌" {
+		t.Fatalf("folder must reach the database filter: %+v", last)
+	}
+	if !strings.Contains(res.Output, `folder="2. 常规临床试验方案/肿瘤方案/乳腺癌"`) {
+		t.Fatalf("output must carry the folder: %s", res.Output)
+	}
+}
+
+func TestListDocumentsUnknownFolderListsAvailableFolders(t *testing.T) {
+	tool := newListDocumentsFixture()
+	res, err := tool.Execute(context.Background(),
+		json.RawMessage(`{"knowledge_base_id":"kb-1","folder":"不存在的目录"}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if res.Data["total_docs"] != int64(0) ||
+		!strings.Contains(res.Output, `No documents in folder "不存在的目录"`) ||
+		!strings.Contains(res.Output, "Available folders:") {
+		t.Fatalf("unknown folder = %s data=%+v", res.Output, res.Data)
 	}
 }

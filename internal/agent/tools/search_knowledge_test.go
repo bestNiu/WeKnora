@@ -397,3 +397,65 @@ func TestFormatOutputPreservesChunkType(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchKnowledgeFolderScopePinsDocumentIDs(t *testing.T) {
+	folder := "2. 常规临床试验方案/肿瘤方案/乳腺癌"
+	docs := []*types.Knowledge{
+		{ID: "d1", KnowledgeBaseID: "kb-1", Title: "A", FolderPath: folder},
+		{ID: "d2", KnowledgeBaseID: "kb-1", Title: "B", FolderPath: "2. 常规临床试验方案/肿瘤方案/肺癌"},
+	}
+	knowledge := &readDocKnowledgeService{
+		docs:  map[string]*types.Knowledge{"d1": docs[0], "d2": docs[1]},
+		pages: map[string]*types.PageResult{"kb-1": {Data: docs}},
+	}
+	kbSvc := &stubKnowledgeBaseService{results: []*types.SearchResult{{
+		ID: "c1", KnowledgeID: "d1", KnowledgeBaseID: "kb-1", Content: "乳腺癌 入排", Score: 0.9,
+	}}}
+	tool := NewSearchKnowledgeTool(
+		kbSvc, knowledge, nil,
+		types.SearchTargets{{
+			Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 7,
+		}},
+		nil, &config.Config{Conversation: &config.ConversationConfig{}},
+	)
+
+	res, err := tool.Execute(context.Background(),
+		json.RawMessage(`{"query":"乳腺癌的入排标准","folder":"乳腺癌"}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if got := kbSvc.lastParams.KnowledgeIDs; len(got) != 1 || got[0] != "d1" {
+		t.Fatalf("folder must pin only its documents: %v", got)
+	}
+	if res.Data["folder"] != folder {
+		t.Fatalf("folder = %v, want %q", res.Data["folder"], folder)
+	}
+}
+
+func TestSearchKnowledgeUnknownFolderIsEmptyNotAFailedSearch(t *testing.T) {
+	knowledge := &readDocKnowledgeService{
+		pages: map[string]*types.PageResult{"kb-1": {Data: []*types.Knowledge{
+			{ID: "d1", KnowledgeBaseID: "kb-1", Title: "A", FolderPath: "3. 募小助方案摘要"},
+		}}},
+	}
+	kbSvc := &stubKnowledgeBaseService{}
+	tool := NewSearchKnowledgeTool(
+		kbSvc, knowledge, nil,
+		types.SearchTargets{{
+			Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 7,
+		}},
+		nil, &config.Config{Conversation: &config.ConversationConfig{}},
+	)
+	res, err := tool.Execute(context.Background(),
+		json.RawMessage(`{"query":"x","folder":"不存在的目录"}`))
+	if err != nil || !res.Success {
+		t.Fatalf("unknown folder must be an empty result, not an error: res=%+v err=%v", res, err)
+	}
+	if !strings.Contains(res.Output, `No documents in folder "不存在的目录"`) ||
+		!strings.Contains(res.Output, "3. 募小助方案摘要") {
+		t.Fatalf("output = %q", res.Output)
+	}
+	if kbSvc.lastParams.QueryText != "" {
+		t.Fatalf("an empty folder must not hit retrieval: %+v", kbSvc.lastParams)
+	}
+}
